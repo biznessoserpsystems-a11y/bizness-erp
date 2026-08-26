@@ -23,7 +23,7 @@ jobs:
 
       - name: Build installer
         working-directory: desktop
-        run: npm run build
+        run: npm run dist
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
