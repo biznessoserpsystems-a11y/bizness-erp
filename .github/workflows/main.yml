@@ -24,7 +24,9 @@ jobs:
       - name: Build installer
         working-directory: desktop
         run: npm run dist
-
+        env:
+          BIZNESS_OS_APP_URL: ${{ vars.BIZNESS_OS_APP_URL }}
+          
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
