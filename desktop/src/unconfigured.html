@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bizness-OS</title>
+<style>
+  body {
+    margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0B6E4F; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: center; padding: 40px; box-sizing: border-box;
+  }
+  .card { max-width: 440px; }
+  h1 { font-size: 22px; margin-bottom: 12px; }
+  p { font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.85); }
+  code { background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>No app URL configured</h1>
+    <p>
+      This build of the Bizness-OS desktop app doesn't have a deployment URL baked in.
+      Set the <code>BIZNESS_OS_APP_URL</code> repository variable in GitHub before running
+      the desktop build workflow, so it knows which deployed instance to open.
+    </p>
+  </div>
+</body>
+</html>

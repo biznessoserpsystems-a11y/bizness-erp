@@ -1,0 +1,40 @@
+{
+  "name": "bizness-os-desktop",
+  "version": "1.0.0",
+  "description": "Bizness-OS desktop app - a native shell around the deployed web app, not a separate copy of it",
+  "author": "Bizness-OS",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.bizness-os.desktop",
+    "productName": "Bizness-OS",
+    "files": [
+      "src/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
