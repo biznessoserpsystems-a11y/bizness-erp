@@ -22,8 +22,8 @@ jobs:
       - name: Write config.json
         working-directory: desktop/src
         run: |
-          echo { "appUrl": "${{ vars.BIZNESS_OS_APP_URL }}" } > config.json
-          type config.json
+          Set-Content -Path config.json -Value '{"appUrl": "${{ vars.BIZNESS_OS_APP_URL }}"}'
+          Get-Content config.json
 
       - name: Build installer
         working-directory: desktop
