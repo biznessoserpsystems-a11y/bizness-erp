@@ -1,10 +1,8 @@
 name: Build Desktop Installer
-
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: windows-latest
@@ -21,12 +19,16 @@ jobs:
         working-directory: desktop
         run: npm install
 
+      - name: Write config.json
+        working-directory: desktop/src
+        run: |
+          echo { "appUrl": "${{ vars.BIZNESS_OS_APP_URL }}" } > config.json
+          type config.json
+
       - name: Build installer
         working-directory: desktop
         run: npm run dist
-        env:
-          BIZNESS_OS_APP_URL: ${{ vars.BIZNESS_OS_APP_URL }}
-          
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
