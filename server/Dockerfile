@@ -1,6 +1,8 @@
 # Use Node.js Alpine for a small image size
 FROM node:18-alpine
 
+RUN apk add --no-cache postgresql-client
+
 # Create and set the working directory inside the container
 WORKDIR /usr/src/app
 
