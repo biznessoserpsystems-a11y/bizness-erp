@@ -552,6 +552,12 @@ function EmployeeDetail({ id, canManage, onBack }) {
     dateOfBirth: '', gender: '', maritalStatus: '', nationalId: '', address: '',
     emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '',
   });
+  const [employment, setEmployment] = useState({
+    jobTitle: '', department: '', employmentType: 'full_time',
+    basicSalary: '', allowances: '', bankName: '', bankAccountNumber: '',
+    ssnitNumber: '', tinNumber: '',
+  });
+  const [employmentSaving, setEmploymentSaving] = useState(false);
   const confirm = useConfirm();
   const { showToast } = useToast();
 
@@ -568,6 +574,17 @@ function EmployeeDetail({ id, canManage, onBack }) {
         emergencyContactName: data.emergency_contact_name || '',
         emergencyContactPhone: data.emergency_contact_phone || '',
         emergencyContactRelationship: data.emergency_contact_relationship || '',
+      });
+      setEmployment({
+        jobTitle: data.job_title || '',
+        department: data.department || '',
+        employmentType: data.employment_type || 'full_time',
+        basicSalary: data.basic_salary ?? '',
+        allowances: data.allowances ?? '',
+        bankName: data.bank_name || '',
+        bankAccountNumber: data.bank_account_number || '',
+        ssnitNumber: data.ssnit_number || '',
+        tinNumber: data.tin_number || '',
       });
     }).finally(() => setLoading(false));
     api.get(`/employees/${id}/history`).then(({ data }) => setHistory(data)).catch(() => setHistory([]));
@@ -653,6 +670,24 @@ function EmployeeDetail({ id, canManage, onBack }) {
       setError(err.response?.data?.error || 'Failed to save personal details');
     } finally {
       setPersonalSaving(false);
+    }
+  }
+
+  async function saveEmployment(e) {
+    e.preventDefault();
+    setEmploymentSaving(true);
+    try {
+      await api.patch(`/employees/${id}`, {
+        ...employment,
+        basicSalary: Number(employment.basicSalary) || 0,
+        allowances: Number(employment.allowances) || 0,
+      });
+      showToast('Employment details saved.', 'success');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save employment details');
+    } finally {
+      setEmploymentSaving(false);
     }
   }
 
@@ -773,6 +808,64 @@ function EmployeeDetail({ id, canManage, onBack }) {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><h2>Employment &amp; pay details</h2></div>
+        {canManage ? (
+          <form onSubmit={saveEmployment}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+              <div className="form-group">
+                <label>Job title</label>
+                <input value={employment.jobTitle} onChange={(e) => setEmployment({ ...employment, jobTitle: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Department</label>
+                <input value={employment.department} onChange={(e) => setEmployment({ ...employment, department: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Employment type</label>
+                <select value={employment.employmentType} onChange={(e) => setEmployment({ ...employment, employmentType: e.target.value })}>
+                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Basic salary (GHS/month)</label>
+                <input type="number" min="0" step="0.01" value={employment.basicSalary} onChange={(e) => setEmployment({ ...employment, basicSalary: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Allowances (GHS/month)</label>
+                <input type="number" min="0" step="0.01" value={employment.allowances} onChange={(e) => setEmployment({ ...employment, allowances: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Bank name</label>
+                <input value={employment.bankName} onChange={(e) => setEmployment({ ...employment, bankName: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Bank account number</label>
+                <input value={employment.bankAccountNumber} onChange={(e) => setEmployment({ ...employment, bankAccountNumber: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>SSNIT number</label>
+                <input value={employment.ssnitNumber} onChange={(e) => setEmployment({ ...employment, ssnitNumber: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>TIN</label>
+                <input value={employment.tinNumber} onChange={(e) => setEmployment({ ...employment, tinNumber: e.target.value })} />
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto', marginTop: 8 }} disabled={employmentSaving}>
+              {employmentSaving ? 'Saving...' : 'Save employment details'}
+            </button>
+          </form>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+            <div><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Job title</div><div style={{ fontWeight: 600 }}>{employee.job_title || '—'}</div></div>
+            <div><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Department</div><div style={{ fontWeight: 600 }}>{employee.department || '—'}</div></div>
+            <div><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Employment type</div><div style={{ fontWeight: 600 }}>{(employee.employment_type || '').replace('_', ' ') || '—'}</div></div>
+            <div><div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Bank</div><div style={{ fontWeight: 600 }}>{employee.bank_name || '—'} {employee.bank_account_number && `(${employee.bank_account_number})`}</div></div>
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
