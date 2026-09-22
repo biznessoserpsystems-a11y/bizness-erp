@@ -6,10 +6,8 @@ headers = []
   [functions."*"]
 
 [build]
-publish = "C:\\users\\admin\\Desktop\\bizness-os\\client\\dist"
-publishOrigin = "ui"
-commandOrigin = "ui"
-base = "C:\\users\\admin\\Desktop\\bizness-os\\client"
+publish = "client/dist"
+base = "client"
 command = "npm run build"
 
   [build.environment]
