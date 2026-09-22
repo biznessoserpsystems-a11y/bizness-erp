@@ -6,7 +6,7 @@ headers = []
   [functions."*"]
 
 [build]
-publish = "client/dist"
+publish = "dist"
 base = "client"
 command = "npm run build"
 
