@@ -366,6 +366,71 @@ function multiTableToPdf({ title, subtitle, tables }) {
 
 // ----------------------------------------------------------------- Word ----
 
+// A single employee's payslip — a bespoke layout (company header, employee
+// details, earnings, deductions, net pay), not the generic table/statement
+// shape the report exports use, since a payslip has its own fixed structure.
+function payslipToPdf({ companyName, employee, run, payslip }) {
+  const doc = new PDFDocument({ margin: 40, size: 'A4' });
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const contentWidth = right - left;
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor('#0B6E4F').text(companyName || 'Payslip', { align: 'center' });
+  doc.font('Helvetica').fontSize(11).fillColor('#221F1A').text('Payslip', { align: 'center' });
+  doc.moveDown();
+
+  const periodLabel = new Date(run.period_year, run.period_month - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+  doc.font('Helvetica-Bold').fontSize(10);
+  doc.text(`Period: ${periodLabel}`);
+  doc.text(`Employee: ${employee.first_name} ${employee.last_name} (${employee.employee_no})`);
+  if (employee.department) doc.text(`Department: ${employee.department}`);
+  if (employee.job_title) doc.text(`Position: ${employee.job_title}`);
+  if (employee.ssnit_number) doc.text(`SSNIT No.: ${employee.ssnit_number}`);
+  if (employee.tin_number) doc.text(`TIN: ${employee.tin_number}`);
+  doc.moveDown();
+  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#E7E0D2').stroke();
+  doc.moveDown(0.5);
+
+  function line(label, amount, bold = false) {
+    const y = doc.y;
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10);
+    doc.text(label, left, y, { width: contentWidth * 0.6 });
+    doc.text(fmtCell(amount, 'currency'), left + contentWidth * 0.6, y, { width: contentWidth * 0.4, align: 'right' });
+    doc.moveDown(0.6);
+  }
+
+  doc.font('Helvetica-Bold').fontSize(11).text('Earnings');
+  doc.moveDown(0.3);
+  line('Basic Salary', payslip.basic_salary);
+  if (Number(payslip.allowances) > 0) line('Allowances', payslip.allowances);
+  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').stroke();
+  doc.moveDown(0.2);
+  line('Gross Pay', payslip.gross_pay, true);
+  doc.moveDown(0.6);
+
+  doc.font('Helvetica-Bold').fontSize(11).text('Deductions');
+  doc.moveDown(0.3);
+  if (Number(payslip.ssnit_employee) > 0) line('SSNIT (Employee)', payslip.ssnit_employee);
+  if (Number(payslip.income_tax) > 0) line('PAYE (Income Tax)', payslip.income_tax);
+  if (Number(payslip.withholding_tax) > 0) line('Withholding Tax', payslip.withholding_tax);
+  if (Number(payslip.other_deductions) > 0) line('Other Deductions', payslip.other_deductions);
+  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').stroke();
+  doc.moveDown(0.2);
+  line('Total Deductions', payslip.total_deductions, true);
+  doc.moveDown(0.8);
+
+  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').lineWidth(1.5).stroke();
+  doc.moveDown(0.3);
+  doc.font('Helvetica-Bold').fontSize(13).fillColor('#0B6E4F');
+  line('NET PAY', payslip.net_pay, true);
+  doc.fillColor('#221F1A');
+
+  doc.moveDown(2);
+  doc.font('Helvetica').fontSize(8).fillColor('#726B5C').text('This is a computer-generated payslip and does not require a signature.', { align: 'center' });
+
+  return collectPdfBuffer(doc);
+}
+
 async function tableToDocx({ title, subtitle, columns, rows }) {
   const headerRow = new TableRow({
     children: columns.map((col) => new TableCell({
@@ -495,4 +560,4 @@ async function sendExport(res, format, filenameBase, data) {
   res.send(buffer);
 }
 
-module.exports = { buildExport, sendExport, MIME, fmtCell };
+module.exports = { buildExport, sendExport, MIME, fmtCell, payslipToPdf };
