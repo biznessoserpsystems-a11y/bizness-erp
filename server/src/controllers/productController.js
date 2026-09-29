@@ -101,7 +101,7 @@ const createProduct = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const {
-    name, description, categoryId, brandId, uomId, barcode,
+    sku, name, description, categoryId, brandId, uomId, barcode,
     costPrice, sellingPrice, reorderLevel, reorderQuantity, isActive, productType,
   } = req.body;
   const validTypes = ['trading', 'raw_material', 'finished_good'];
@@ -110,19 +110,35 @@ const updateProduct = asyncHandler(async (req, res) => {
   const existing = await db.query('SELECT * FROM products WHERE id = $1 AND company_id = $2', [id, req.user.companyId]);
   if (!existing.rows.length) throw new ApiError(404, 'Product not found');
 
+  // SKU is locked by default (see inventory_settings.sku_editing_enabled) —
+  // it's the natural key tying together stock_levels, stock_batches, order
+  // line items, and printed labels, so changing it is opt-in per company.
+  let newSku = null;
+  if (sku !== undefined && sku !== existing.rows[0].sku) {
+    const settings = await inventorySettingsService.getSettings(db, req.user.companyId);
+    if (!settings.sku_editing_enabled) {
+      throw new ApiError(403, 'SKU editing is disabled. Enable it under Inventory & Warehouse Settings first.');
+    }
+    if (!sku) throw new ApiError(400, 'sku cannot be empty');
+    const dup = await db.query('SELECT id FROM products WHERE company_id = $1 AND sku = $2 AND id != $3', [req.user.companyId, sku, id]);
+    if (dup.rows.length) throw new ApiError(409, 'A product with this SKU already exists');
+    newSku = sku;
+  }
+
   // is_batch_tracked / is_expiry_tracked are intentionally not editable after
   // creation, since flipping them mid-stream would orphan existing stock_levels
   // vs stock_batches accounting.
   const { rows } = await db.query(
     `UPDATE products SET
+       sku = COALESCE($13, sku),
        name = COALESCE($1, name), description = COALESCE($2, description),
        category_id = COALESCE($3, category_id), brand_id = COALESCE($4, brand_id),
        uom_id = COALESCE($5, uom_id), barcode = COALESCE($6, barcode),
        cost_price = COALESCE($7, cost_price), selling_price = COALESCE($8, selling_price),
        reorder_level = COALESCE($9, reorder_level), reorder_quantity = COALESCE($10, reorder_quantity),
        is_active = COALESCE($11, is_active), product_type = COALESCE($12, product_type), updated_at = NOW()
-     WHERE id = $13 RETURNING *`,
-    [name, description, categoryId, brandId, uomId, barcode, costPrice, sellingPrice, reorderLevel, reorderQuantity, isActive, productType, id]
+     WHERE id = $14 RETURNING *`,
+    [name, description, categoryId, brandId, uomId, barcode, costPrice, sellingPrice, reorderLevel, reorderQuantity, isActive, productType, newSku, id]
   );
 
   await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'product', entityId: id, newValues: req.body, ip: req.ip });

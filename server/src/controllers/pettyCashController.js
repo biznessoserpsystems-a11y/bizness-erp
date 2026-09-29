@@ -37,6 +37,40 @@ const createPettyCashAccount = asyncHandler(async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// PUT /petty-cash-accounts/:id
+const updatePettyCashAccount = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, custodianUserId, floatAmount } = req.body;
+  const { rows } = await db.query(
+    `UPDATE petty_cash_accounts SET name = $1, custodian_user_id = $2, float_amount = $3
+     WHERE id = $4 AND company_id = $5 RETURNING *`,
+    [name, custodianUserId || null, floatAmount, id, req.user.companyId]
+  );
+  if (!rows.length) throw new ApiError(404, 'Petty cash account not found');
+  await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'petty_cash_account', entityId: id, newValues: { name, custodianUserId, floatAmount }, ip: req.ip });
+  res.json(rows[0]);
+});
+
+// DELETE /petty-cash-accounts/:id
+const deletePettyCashAccount = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const existing = await db.query('SELECT id FROM petty_cash_accounts WHERE id = $1 AND company_id = $2', [id, req.user.companyId]);
+  if (!existing.rows.length) throw new ApiError(404, 'Petty cash account not found');
+
+  const activity = await db.query(
+    `SELECT (SELECT COUNT(*) FROM petty_cash_vouchers WHERE petty_cash_account_id = $1) AS voucher_count,
+            (SELECT COUNT(*) FROM petty_cash_receipts WHERE petty_cash_account_id = $1) AS receipt_count`,
+    [id]
+  );
+  if (Number(activity.rows[0].voucher_count) > 0 || Number(activity.rows[0].receipt_count) > 0) {
+    throw new ApiError(400, 'Cannot delete a petty cash account that has vouchers or receipts.');
+  }
+
+  await db.query('DELETE FROM petty_cash_accounts WHERE id = $1 AND company_id = $2', [id, req.user.companyId]);
+  await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'DELETE', entityType: 'petty_cash_account', entityId: id, ip: req.ip });
+  res.status(204).send();
+});
+
 // GET /petty-cash-accounts/:id/vouchers
 const listVouchers = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -96,6 +130,102 @@ const createVoucher = asyncHandler(async (req, res) => {
     await client.query('COMMIT');
     await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'CREATE', entityType: 'petty_cash_voucher', entityId: voucher.id, newValues: { voucherNo, amount }, ip: req.ip });
     res.status(201).json({ ...voucher, journal_entry_id: entry.id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /petty-cash-accounts/:id/vouchers/:voucherId
+// True edit: reverses the old journal entry and posts a fresh one with the
+// new figures, so the general ledger always reflects the latest version.
+const updateVoucher = asyncHandler(async (req, res) => {
+  const { id, voucherId } = req.params;
+  const { payee, description, amount, expenseAccountId, voucherDate } = req.body;
+  if (!description || !amount || !expenseAccountId) throw new ApiError(400, 'description, amount, and expenseAccountId are required');
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const pettyCashResult = await client.query('SELECT * FROM petty_cash_accounts WHERE id = $1 AND company_id = $2 FOR UPDATE', [id, req.user.companyId]);
+    if (!pettyCashResult.rows.length) throw new ApiError(404, 'Petty cash account not found');
+    const pettyCash = pettyCashResult.rows[0];
+
+    const voucherResult = await client.query('SELECT * FROM petty_cash_vouchers WHERE id = $1 AND petty_cash_account_id = $2', [voucherId, id]);
+    if (!voucherResult.rows.length) throw new ApiError(404, 'Voucher not found');
+    const voucher = voucherResult.rows[0];
+
+    if (voucher.journal_entry_id) {
+      await accountingService.reverseJournalEntry(client, {
+        companyId: req.user.companyId, userId: req.user.id, journalEntryId: voucher.journal_entry_id,
+        reason: `Voucher ${voucher.voucher_no} edited`,
+      });
+    }
+
+    const spentResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS spent FROM petty_cash_vouchers WHERE petty_cash_account_id = $1 AND id != $2', [id, voucherId]);
+    const receiptsResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS received FROM petty_cash_receipts WHERE petty_cash_account_id = $1', [id]);
+    const available = Number(pettyCash.float_amount) + Number(receiptsResult.rows[0].received) - Number(spentResult.rows[0].spent);
+    if (Number(amount) > available + 0.01) {
+      throw new ApiError(400, `Only GHS ${available.toFixed(2)} remains in this petty cash float`);
+    }
+
+    const entry = await accountingService.postJournalEntry(client, {
+      companyId: req.user.companyId, userId: req.user.id, entryDate: voucherDate || voucher.voucher_date,
+      referenceType: 'petty_cash', referenceId: voucher.id, description: `Petty cash voucher ${voucher.voucher_no} (edited): ${description}`,
+      lines: [
+        { accountId: expenseAccountId, debit: amount, credit: 0, description },
+        { accountId: pettyCash.account_id, debit: 0, credit: amount, description: `Voucher ${voucher.voucher_no}` },
+      ],
+    });
+
+    const updated = await client.query(
+      `UPDATE petty_cash_vouchers SET payee = $1, description = $2, amount = $3, expense_account_id = $4, voucher_date = $5, journal_entry_id = $6
+       WHERE id = $7 RETURNING *`,
+      [payee || null, description, amount, expenseAccountId, voucherDate || voucher.voucher_date, entry.id, voucherId]
+    );
+
+    await client.query('COMMIT');
+    await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'petty_cash_voucher', entityId: voucherId, oldValues: { amount: voucher.amount, description: voucher.description }, newValues: { amount, description }, ip: req.ip });
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /petty-cash-accounts/:id/vouchers/:voucherId
+// True delete: reverses the linked journal entry first so the books stay
+// balanced, then removes the voucher row itself.
+const deleteVoucher = asyncHandler(async (req, res) => {
+  const { id, voucherId } = req.params;
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const voucherResult = await client.query(
+      `SELECT pcv.* FROM petty_cash_vouchers pcv JOIN petty_cash_accounts pca ON pca.id = pcv.petty_cash_account_id
+       WHERE pcv.id = $1 AND pcv.petty_cash_account_id = $2 AND pca.company_id = $3`,
+      [voucherId, id, req.user.companyId]
+    );
+    if (!voucherResult.rows.length) throw new ApiError(404, 'Voucher not found');
+    const voucher = voucherResult.rows[0];
+
+    if (voucher.journal_entry_id) {
+      await accountingService.reverseJournalEntry(client, {
+        companyId: req.user.companyId, userId: req.user.id, journalEntryId: voucher.journal_entry_id,
+        reason: `Voucher ${voucher.voucher_no} deleted`,
+      });
+    }
+
+    await client.query('DELETE FROM petty_cash_vouchers WHERE id = $1', [voucherId]);
+
+    await client.query('COMMIT');
+    await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'DELETE', entityType: 'petty_cash_voucher', entityId: voucherId, oldValues: { amount: voucher.amount, description: voucher.description }, ip: req.ip });
+    res.status(204).send();
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -189,128 +319,8 @@ const createReceipt = asyncHandler(async (req, res) => {
     client.release();
   }
 });
-const updatePettyCashAccount = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { name, custodianUserId, floatAmount } = req.body;
-  const { rows } = await db.query(
-    `UPDATE petty_cash_accounts SET name = $1, custodian_user_id = $2, float_amount = $3
-     WHERE id = $4 AND company_id = $5 RETURNING *`,
-    [name, custodianUserId || null, floatAmount, id, req.user.companyId]
-  );
-  if (!rows.length) throw new ApiError(404, 'Petty cash account not found');
-  await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'petty_cash_account', entityId: id, newValues: { name, custodianUserId, floatAmount }, ip: req.ip });
-  res.json(rows[0]);
-});
 
-const deletePettyCashAccount = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const existing = await db.query('SELECT id FROM petty_cash_accounts WHERE id = $1 AND company_id = $2', [id, req.user.companyId]);
-  if (!existing.rows.length) throw new ApiError(404, 'Petty cash account not found');
-
-  const activity = await db.query(
-    `SELECT (SELECT COUNT(*) FROM petty_cash_vouchers WHERE petty_cash_account_id = $1) AS voucher_count,
-            (SELECT COUNT(*) FROM petty_cash_receipts WHERE petty_cash_account_id = $1) AS receipt_count`,
-    [id]
-  );
-  if (Number(activity.rows[0].voucher_count) > 0 || Number(activity.rows[0].receipt_count) > 0) {
-    throw new ApiError(400, 'Cannot delete a petty cash account that has vouchers or receipts.');
-  }
-
-  await db.query('DELETE FROM petty_cash_accounts WHERE id = $1 AND company_id = $2', [id, req.user.companyId]);
-  await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'DELETE', entityType: 'petty_cash_account', entityId: id, ip: req.ip });
-  res.status(204).send();
-});
-
-const updateVoucher = asyncHandler(async (req, res) => {
-  const { id, voucherId } = req.params;
-  const { payee, description, amount, expenseAccountId, voucherDate } = req.body;
-  if (!description || !amount || !expenseAccountId) throw new ApiError(400, 'description, amount, and expenseAccountId are required');
-
-  const client = await db.getClient();
-  try {
-    await client.query('BEGIN');
-
-    const pettyCashResult = await client.query('SELECT * FROM petty_cash_accounts WHERE id = $1 AND company_id = $2 FOR UPDATE', [id, req.user.companyId]);
-    if (!pettyCashResult.rows.length) throw new ApiError(404, 'Petty cash account not found');
-    const pettyCash = pettyCashResult.rows[0];
-
-    const voucherResult = await client.query('SELECT * FROM petty_cash_vouchers WHERE id = $1 AND petty_cash_account_id = $2', [voucherId, id]);
-    if (!voucherResult.rows.length) throw new ApiError(404, 'Voucher not found');
-    const voucher = voucherResult.rows[0];
-
-    if (voucher.journal_entry_id) {
-      await accountingService.reverseJournalEntry(client, {
-        companyId: req.user.companyId, userId: req.user.id, journalEntryId: voucher.journal_entry_id,
-        reason: `Voucher ${voucher.voucher_no} edited`,
-      });
-    }
-
-    const spentResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS spent FROM petty_cash_vouchers WHERE petty_cash_account_id = $1 AND id != $2', [id, voucherId]);
-    const receiptsResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS received FROM petty_cash_receipts WHERE petty_cash_account_id = $1', [id]);
-    const available = Number(pettyCash.float_amount) + Number(receiptsResult.rows[0].received) - Number(spentResult.rows[0].spent);
-    if (Number(amount) > available + 0.01) {
-      throw new ApiError(400, `Only GHS ${available.toFixed(2)} remains in this petty cash float`);
-    }
-
-    const entry = await accountingService.postJournalEntry(client, {
-      companyId: req.user.companyId, userId: req.user.id, entryDate: voucherDate || voucher.voucher_date,
-      referenceType: 'petty_cash', referenceId: voucher.id, description: `Petty cash voucher ${voucher.voucher_no} (edited): ${description}`,
-      lines: [
-        { accountId: expenseAccountId, debit: amount, credit: 0, description },
-        { accountId: pettyCash.account_id, debit: 0, credit: amount, description: `Voucher ${voucher.voucher_no}` },
-      ],
-    });
-
-    const updated = await client.query(
-      `UPDATE petty_cash_vouchers SET payee = $1, description = $2, amount = $3, expense_account_id = $4, voucher_date = $5, journal_entry_id = $6
-       WHERE id = $7 RETURNING *`,
-      [payee || null, description, amount, expenseAccountId, voucherDate || voucher.voucher_date, entry.id, voucherId]
-    );
-
-    await client.query('COMMIT');
-    await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'petty_cash_voucher', entityId: voucherId, oldValues: { amount: voucher.amount, description: voucher.description }, newValues: { amount, description }, ip: req.ip });
-    res.json(updated.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-});
-
-const deleteVoucher = asyncHandler(async (req, res) => {
-  const { id, voucherId } = req.params;
-  const client = await db.getClient();
-  try {
-    await client.query('BEGIN');
-    const voucherResult = await client.query(
-      `SELECT pcv.* FROM petty_cash_vouchers pcv JOIN petty_cash_accounts pca ON pca.id = pcv.petty_cash_account_id
-       WHERE pcv.id = $1 AND pcv.petty_cash_account_id = $2 AND pca.company_id = $3`,
-      [voucherId, id, req.user.companyId]
-    );
-    if (!voucherResult.rows.length) throw new ApiError(404, 'Voucher not found');
-    const voucher = voucherResult.rows[0];
-
-    if (voucher.journal_entry_id) {
-      await accountingService.reverseJournalEntry(client, {
-        companyId: req.user.companyId, userId: req.user.id, journalEntryId: voucher.journal_entry_id,
-        reason: `Voucher ${voucher.voucher_no} deleted`,
-      });
-    }
-
-    await client.query('DELETE FROM petty_cash_vouchers WHERE id = $1', [voucherId]);
-
-    await client.query('COMMIT');
-    await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'DELETE', entityType: 'petty_cash_voucher', entityId: voucherId, oldValues: { amount: voucher.amount, description: voucher.description }, ip: req.ip });
-    res.status(204).send();
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-});
-
+// PUT /petty-cash-accounts/:id/receipts/:receiptId
 const updateReceipt = asyncHandler(async (req, res) => {
   const { id, receiptId } = req.params;
   const { receivedFrom, paymentMethod, bankAccountId, referenceNo, amount, receiptDate } = req.body;
@@ -378,6 +388,7 @@ const updateReceipt = asyncHandler(async (req, res) => {
   }
 });
 
+// DELETE /petty-cash-accounts/:id/receipts/:receiptId
 const deleteReceipt = asyncHandler(async (req, res) => {
   const { id, receiptId } = req.params;
   const client = await db.getClient();
@@ -410,4 +421,9 @@ const deleteReceipt = asyncHandler(async (req, res) => {
     client.release();
   }
 });
-module.exports = { listPettyCashAccounts, createPettyCashAccount, listVouchers, createVoucher, listReceipts, createReceipt };
+
+module.exports = {
+  listPettyCashAccounts, createPettyCashAccount, updatePettyCashAccount, deletePettyCashAccount,
+  listVouchers, createVoucher, updateVoucher, deleteVoucher,
+  listReceipts, createReceipt, updateReceipt, deleteReceipt,
+};
