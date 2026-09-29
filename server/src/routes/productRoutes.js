@@ -7,6 +7,7 @@ const { requirePermission } = require('../middleware/rbac');
 router.use(authenticate);
 
 router.get('/products', productController.listProducts);
+router.get('/products/sku-editing', productController.getSkuEditing);
 router.get('/products/:id', productController.getProduct);
 router.post('/products', requirePermission('inventory.products.manage'), productController.createProduct);
 router.patch('/products/:id', requirePermission('inventory.products.manage'), productController.updateProduct);

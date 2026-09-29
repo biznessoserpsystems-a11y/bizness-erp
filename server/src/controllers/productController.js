@@ -22,6 +22,13 @@ const listProducts = asyncHandler(async (req, res) => {
   res.json(rows);
 });
 
+// GET /products/sku-editing — lets anyone who can edit products know whether
+// the SKU field is unlocked, without needing inventory.settings.manage.
+const getSkuEditing = asyncHandler(async (req, res) => {
+  const settings = await inventorySettingsService.getSettings(db, req.user.companyId);
+  res.json({ enabled: !!settings.sku_editing_enabled });
+});
+
 const getProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const productResult = await db.query(
@@ -161,4 +168,5 @@ const setWarehouseSettings = asyncHandler(async (req, res) => {
   res.json(rows[0]);
 });
 
-module.exports = { listProducts, getProduct, createProduct, updateProduct, setWarehouseSettings };
+module.exports = {
+  getSkuEditing, listProducts, getProduct, createProduct, updateProduct, setWarehouseSettings };

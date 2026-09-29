@@ -21,6 +21,7 @@ export default function InventorySettings() {
           defaultReorderQuantity: s.data.default_reorder_quantity,
           expiryAlertWindowDays: s.data.expiry_alert_window_days,
           stockCountVarianceTolerancePct: s.data.stock_count_variance_tolerance_pct,
+          skuEditingEnabled: !!s.data.sku_editing_enabled,
         });
         setWarehouses(w.data);
       })
@@ -113,6 +114,22 @@ export default function InventorySettings() {
                 onChange={(e) => setForm((f) => ({ ...f, defaultReorderQuantity: e.target.value }))}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><h2>Product SKUs</h2></div>
+          <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+            SKUs are locked by default because they tie together stock levels, batches, order lines and printed labels.
+            Turn this on to let users with product-management permission change a product's SKU. New SKUs must still be unique.
+          </p>
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox" id="skuEditingEnabled" checked={form.skuEditingEnabled}
+              onChange={(e) => setForm((f) => ({ ...f, skuEditingEnabled: e.target.checked }))}
+              style={{ width: 'auto' }}
+            />
+            <label htmlFor="skuEditingEnabled" style={{ margin: 0 }}>Allow editing product SKUs</label>
           </div>
         </div>
 
