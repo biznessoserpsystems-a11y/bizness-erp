@@ -222,6 +222,12 @@ function ProductModal({ product, categories, brands, uoms, onClose, onSaved }) {
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [skuEditable, setSkuEditable] = useState(false);
+
+  useEffect(() => {
+    if (isNew) return;
+    api.get('/products/sku-editing').then((r) => setSkuEditable(!!r.data.enabled)).catch(() => setSkuEditable(false));
+  }, [isNew]);
 
   function update(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -253,7 +259,12 @@ function ProductModal({ product, categories, brands, uoms, onClose, onSaved }) {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>SKU</label>
-            <input value={form.sku} onChange={update('sku')} required disabled={!isNew} />
+            <input value={form.sku} onChange={update('sku')} required disabled={!isNew && !skuEditable} />
+            {!isNew && !skuEditable && (
+              <small style={{ color: 'var(--color-text-muted)' }}>
+                SKU editing is off. Enable it under Inventory Settings.
+              </small>
+            )}
           </div>
           <div className="form-group">
             <label>Name</label>

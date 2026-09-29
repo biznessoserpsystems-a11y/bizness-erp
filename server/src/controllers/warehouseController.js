@@ -55,7 +55,7 @@ const getInventorySettings = asyncHandler(async (req, res) => {
 const updateInventorySettings = asyncHandler(async (req, res) => {
   const {
     defaultWarehouseId, allowNegativeStock, defaultReorderLevel, defaultReorderQuantity,
-    expiryAlertWindowDays, stockCountVarianceTolerancePct,
+    expiryAlertWindowDays, stockCountVarianceTolerancePct, skuEditingEnabled,
   } = req.body;
 
   if (expiryAlertWindowDays !== undefined && Number(expiryAlertWindowDays) <= 0) {
@@ -87,13 +87,14 @@ const updateInventorySettings = asyncHandler(async (req, res) => {
        default_reorder_quantity = COALESCE($5, default_reorder_quantity),
        expiry_alert_window_days = COALESCE($6, expiry_alert_window_days),
        stock_count_variance_tolerance_pct = COALESCE($7, stock_count_variance_tolerance_pct),
+       sku_editing_enabled = COALESCE($8, sku_editing_enabled),
        updated_at = NOW()
-     WHERE company_id = $8
+     WHERE company_id = $9
      RETURNING *`,
     [
       defaultWarehouseId || null, defaultWarehouseId === null, allowNegativeStock,
       defaultReorderLevel, defaultReorderQuantity, expiryAlertWindowDays, stockCountVarianceTolerancePct,
-      req.user.companyId,
+      skuEditingEnabled, req.user.companyId,
     ]
   );
 
