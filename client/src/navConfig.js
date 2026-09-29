@@ -199,6 +199,7 @@ export const NAV = [
       { label: 'Backup & Restore', to: '/admin/backup-restore', enabled: true, permission: 'system.backup.manage' },
       { label: 'Access Control', to: '/admin/access-control', enabled: true, permission: 'system.access_control.manage' },
       { label: 'Compliance Calendar', to: '/compliance-calendar', enabled: true, permission: 'system.compliance.manage' },
+      { label: 'Petty Cash Settings', to: '/settings/petty-cash', enabled: true, permission: 'accounting.petty_cash.settings' },
       { label: 'Theme', to: '/settings/theme', enabled: true },
     ],
   },
