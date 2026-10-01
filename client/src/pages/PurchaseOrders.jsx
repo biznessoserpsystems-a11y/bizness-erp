@@ -3,6 +3,9 @@ import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
 import LineItemsEditor, { emptyLine } from '../components/LineItemsEditor';
 import AttachmentsPanel from '../components/AttachmentsPanel';
+import useProcurementControls from '../hooks/useProcurementControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 const STATUS_BADGE = {
   pending: 'badge-neutral', confirmed: 'badge-neutral', partially_received: 'badge-neutral',
@@ -17,6 +20,10 @@ export default function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [detailOrder, setDetailOrder] = useState(null);
+  const [editOrder, setEditOrder] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
 
   function load() {
     setLoading(true);
@@ -30,6 +37,27 @@ export default function PurchaseOrders() {
   async function openDetail(id) {
     const { data } = await api.get(`/purchase-orders/${id}`);
     setDetailOrder(data);
+  }
+
+  async function openEdit(id) {
+    try {
+      const { data } = await api.get(`/purchase-orders/${id}`);
+      setEditOrder(data);
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to load order', 'error');
+    }
+  }
+
+  async function handleDelete(o) {
+    const ok = await confirm(`Delete purchase order ${o.order_no}? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/purchase-orders/${o.id}`);
+      showToast('Purchase order deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete order', 'error');
+    }
   }
 
   async function updateStatus(id, status) {
@@ -61,7 +89,11 @@ export default function PurchaseOrders() {
                   <td>{new Date(o.order_date).toLocaleDateString()}</td>
                   <td>GHS {Number(o.total_amount).toFixed(2)}</td>
                   <td><span className={`badge ${STATUS_BADGE[o.status]}`}>{o.status.replace('_', ' ')}</span></td>
-                  <td><button className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}>View</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}>View</button>
+                    {canEdit && ['pending', 'confirmed'].includes(o.status) && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => openEdit(o.id)}>Edit</button>}
+                    {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(o)}>Delete</button>}
+                  </td>
                 </tr>
               ))}
               {orders.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No purchase orders yet.</td></tr>}
@@ -70,19 +102,25 @@ export default function PurchaseOrders() {
         )}
       </div>
 
-      {showModal && (
-        <OrderModal suppliers={suppliers} products={products} warehouses={warehouses} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      {(showModal || editOrder) && (
+        <OrderModal
+          suppliers={suppliers} products={products} warehouses={warehouses} existing={editOrder}
+          onClose={() => { setShowModal(false); setEditOrder(null); }}
+          onSaved={() => { setShowModal(false); setEditOrder(null); load(); }}
+        />
       )}
     </DashboardLayout>
   );
 }
 
-function OrderModal({ suppliers, products, warehouses, onClose, onSaved }) {
-  const [supplierId, setSupplierId] = useState('');
-  const [warehouseId, setWarehouseId] = useState('');
-  const [expectedDate, setExpectedDate] = useState('');
-  const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState([emptyLine()]);
+function OrderModal({ suppliers, products, warehouses, existing, onClose, onSaved }) {
+  const [supplierId, setSupplierId] = useState(existing?.supplier_id || '');
+  const [warehouseId, setWarehouseId] = useState(existing?.warehouse_id || '');
+  const [expectedDate, setExpectedDate] = useState(existing?.expected_date ? String(existing.expected_date).slice(0, 10) : '');
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [lines, setLines] = useState(existing?.lines?.length
+    ? existing.lines.map((l) => ({ productId: l.product_id, quantity: Number(l.quantity), unitPrice: Number(l.unit_price), discountPercent: Number(l.discount_percent) || 0, taxPercent: Number(l.tax_percent) || 0 }))
+    : [emptyLine()]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -91,16 +129,18 @@ function OrderModal({ suppliers, products, warehouses, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/purchase-orders', {
+      const body = {
         supplierId, warehouseId, expectedDate: expectedDate || undefined, notes,
         lines: lines.filter((l) => l.productId && l.quantity).map((l) => ({
           productId: l.productId, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice),
           discountPercent: Number(l.discountPercent) || 0, taxPercent: Number(l.taxPercent) || 0,
         })),
-      });
+      };
+      if (existing) await api.put(`/purchase-orders/${existing.id}`, body);
+      else await api.post('/purchase-orders', body);
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create purchase order');
+      setError(err.response?.data?.error || (existing ? 'Failed to update purchase order' : 'Failed to create purchase order'));
     } finally {
       setSubmitting(false);
     }
@@ -109,12 +149,12 @@ function OrderModal({ suppliers, products, warehouses, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 700 }} onClick={(e) => e.stopPropagation()}>
-        <h2>New purchase order</h2>
+        <h2>{existing ? `Edit purchase order ${existing.order_no}` : 'New purchase order'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Supplier</label>
-            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required>
+            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required disabled={!!existing}>
               <option value="">Select</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
@@ -137,7 +177,7 @@ function OrderModal({ suppliers, products, warehouses, onClose, onSaved }) {
           <div className="form-group"><label>Notes</label><input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : 'Create order'}</button>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : existing ? 'Save changes' : 'Create order'}</button>
           </div>
         </form>
       </div>

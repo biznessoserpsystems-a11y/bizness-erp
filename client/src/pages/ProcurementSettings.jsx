@@ -21,6 +21,8 @@ export default function ProcurementSettings() {
           requisitionAutoApproveLimit: s.data.requisition_auto_approve_limit,
           poAutoApproveLimit: s.data.po_auto_approve_limit,
           rfqMinQuotes: s.data.rfq_min_quotes,
+          allowRecordEdit: s.data.allow_record_edit !== false,
+          allowRecordDelete: !!s.data.allow_record_delete,
         });
         setCurrencies(c.data.filter((cur) => cur.is_active));
       })
@@ -114,6 +116,32 @@ export default function ProcurementSettings() {
               type="number" min="0" step="1" value={form.rfqMinQuotes}
               onChange={(e) => setForm((f) => ({ ...f, rfqMinQuotes: e.target.value }))}
             />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><h2>Editing and deleting records</h2></div>
+          <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+            These switches apply to requisitions, RFQs, purchase orders, goods received notes, purchase invoices and
+            supplier payments. Even when a switch is on, only users whose role has the matching permission will see the buttons.
+            Deleting a goods received note, purchase invoice or supplier payment reverses its stock and ledger entries, and
+            is blocked if later records depend on it (for example an invoice that has been paid).
+          </p>
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox" id="allowRecordEdit" checked={form.allowRecordEdit}
+              onChange={(e) => setForm((f) => ({ ...f, allowRecordEdit: e.target.checked }))}
+              style={{ width: 'auto' }}
+            />
+            <label htmlFor="allowRecordEdit" style={{ margin: 0 }}>Allow editing procurement records</label>
+          </div>
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox" id="allowRecordDelete" checked={form.allowRecordDelete}
+              onChange={(e) => setForm((f) => ({ ...f, allowRecordDelete: e.target.checked }))}
+              style={{ width: 'auto' }}
+            />
+            <label htmlFor="allowRecordDelete" style={{ margin: 0 }}>Allow deleting procurement records</label>
           </div>
         </div>
 

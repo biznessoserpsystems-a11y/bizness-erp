@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
+import SimpleEditModal from '../components/SimpleEditModal';
+import useInventoryControls from '../hooks/useInventoryControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 const TABS = [
   { key: 'categories', label: 'Categories', endpoint: '/product-categories' },
@@ -9,6 +13,10 @@ const TABS = [
 ];
 
 export default function Catalog() {
+  const { editEnabled, canDelete } = useInventoryControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
+  const [editItem, setEditItem] = useState(null);
   const [tab, setTab] = useState('categories');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +57,23 @@ export default function Catalog() {
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save');
+    }
+  }
+
+  // Delete is offered for categories and brands (units of measure are only activated/deactivated).
+  const canDeleteHere = canDelete && tab !== 'uom';
+  const showActions = editEnabled || canDeleteHere;
+
+  async function handleDelete(item) {
+    const noun = tab === 'brands' ? 'brand' : 'category';
+    const ok = await confirm(`Delete ${noun} "${item.name}"? This only works if no product uses it. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`${activeTab.endpoint}/${item.id}`);
+      showToast(`${noun[0].toUpperCase()}${noun.slice(1)} deleted.`, 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || `Failed to delete ${noun}`, 'error');
     }
   }
 
@@ -116,7 +141,7 @@ export default function Catalog() {
                 {tab === 'uom' && <th>Symbol</th>}
                 {tab !== 'uom' && <th>Description</th>}
                 <th>Status</th>
-                <th></th>
+                {showActions && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -130,20 +155,44 @@ export default function Catalog() {
                       {item.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(item)}>
-                      {item.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </td>
+                  {showActions && (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {editEnabled && tab !== 'uom' && (
+                        <button className="btn btn-secondary btn-sm" style={{ marginRight: 6 }} onClick={() => setEditItem(item)}>Edit</button>
+                      )}
+                      {editEnabled && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(item)}>
+                          {item.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      )}
+                      {canDeleteHere && (
+                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(item)}>Delete</button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
               {items.length === 0 && (
-                <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>Nothing here yet.</td></tr>
+                <tr><td colSpan={showActions ? 4 : 3} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>Nothing here yet.</td></tr>
               )}
             </tbody>
           </table>
         )}
       </div>
+      {editItem && (
+        <SimpleEditModal
+          title={`Edit ${tab === 'brands' ? 'brand' : 'category'}`}
+          fields={[{ key: 'name', label: 'Name' }, { key: 'description', label: 'Description', type: 'textarea' }]}
+          initial={{ name: editItem.name, description: editItem.description }}
+          onSave={async (v) => {
+            await api.patch(`${activeTab.endpoint}/${editItem.id}`, { name: v.name, description: v.description });
+            setEditItem(null);
+            load();
+            showToast('Saved.', 'success');
+          }}
+          onClose={() => setEditItem(null)}
+        />
+      )}
     </DashboardLayout>
   );
 }

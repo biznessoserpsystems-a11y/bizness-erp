@@ -16,7 +16,7 @@ const getProcurementSettings = asyncHandler(async (req, res) => {
 const updateProcurementSettings = asyncHandler(async (req, res) => {
   const {
     defaultPaymentTermsDays, defaultVatRate, defaultCurrency,
-    requisitionAutoApproveLimit, poAutoApproveLimit, rfqMinQuotes,
+    requisitionAutoApproveLimit, poAutoApproveLimit, rfqMinQuotes, allowRecordEdit, allowRecordDelete,
   } = req.body;
 
   if (defaultPaymentTermsDays !== undefined && Number(defaultPaymentTermsDays) < 0) {
@@ -51,10 +51,13 @@ const updateProcurementSettings = asyncHandler(async (req, res) => {
        requisition_auto_approve_limit = COALESCE($4, requisition_auto_approve_limit),
        po_auto_approve_limit = COALESCE($5, po_auto_approve_limit),
        rfq_min_quotes = COALESCE($6, rfq_min_quotes),
+       allow_record_edit = COALESCE($7, allow_record_edit),
+       allow_record_delete = COALESCE($8, allow_record_delete),
        updated_at = NOW()
-     WHERE company_id = $7
+     WHERE company_id = $9
      RETURNING *`,
-    [defaultPaymentTermsDays, defaultVatRate, defaultCurrency, requisitionAutoApproveLimit, poAutoApproveLimit, rfqMinQuotes, req.user.companyId]
+    [defaultPaymentTermsDays, defaultVatRate, defaultCurrency, requisitionAutoApproveLimit, poAutoApproveLimit, rfqMinQuotes,
+      typeof allowRecordEdit === 'boolean' ? allowRecordEdit : null, typeof allowRecordDelete === 'boolean' ? allowRecordDelete : null, req.user.companyId]
   );
 
   await recordAudit({ companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE', entityType: 'procurement_settings', entityId: req.user.companyId, newValues: req.body, ip: req.ip });

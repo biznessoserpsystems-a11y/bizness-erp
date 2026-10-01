@@ -2,10 +2,18 @@ import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import useInventoryControls from '../hooks/useInventoryControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 export default function InventoryWarehouses() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('inventory.warehouses.manage');
+  const { editEnabled, canDelete } = useInventoryControls();
+  const canEdit = canManage && editEnabled;
+  const showActions = canEdit || (canManage && canDelete);
+  const confirm = useConfirm();
+  const { showToast } = useToast();
   const [warehouses, setWarehouses] = useState([]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +30,18 @@ export default function InventoryWarehouses() {
   }
 
   useEffect(load, []);
+
+  async function handleDelete(w) {
+    const ok = await confirm(`Delete warehouse "${w.name}"? This only works for a warehouse that has never held or moved stock. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/warehouses/${w.id}`);
+      showToast('Warehouse deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete warehouse', 'error');
+    }
+  }
 
   return (
     <DashboardLayout title="Warehouses">
@@ -46,7 +66,7 @@ export default function InventoryWarehouses() {
                 <th>Branch</th>
                 <th>Location</th>
                 <th>Status</th>
-                {canManage && <th></th>}
+                {showActions && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -61,17 +81,24 @@ export default function InventoryWarehouses() {
                       {w.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  {canManage && (
-                    <td>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setModalWarehouse(w)}>
-                        Edit
-                      </button>
+                  {showActions && (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {canEdit && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setModalWarehouse(w)}>
+                          Edit
+                        </button>
+                      )}
+                      {canManage && canDelete && (
+                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(w)}>
+                          Delete
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
               ))}
               {warehouses.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No warehouses yet.</td></tr>
+                <tr><td colSpan={showActions ? 6 : 5} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No warehouses yet.</td></tr>
               )}
             </tbody>
           </table>

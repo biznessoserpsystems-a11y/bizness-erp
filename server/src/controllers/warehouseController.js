@@ -55,7 +55,7 @@ const getInventorySettings = asyncHandler(async (req, res) => {
 const updateInventorySettings = asyncHandler(async (req, res) => {
   const {
     defaultWarehouseId, allowNegativeStock, defaultReorderLevel, defaultReorderQuantity,
-    expiryAlertWindowDays, stockCountVarianceTolerancePct, skuEditingEnabled,
+    expiryAlertWindowDays, stockCountVarianceTolerancePct, skuEditingEnabled, allowRecordEdit, allowRecordDelete,
   } = req.body;
 
   if (expiryAlertWindowDays !== undefined && Number(expiryAlertWindowDays) <= 0) {
@@ -88,13 +88,15 @@ const updateInventorySettings = asyncHandler(async (req, res) => {
        expiry_alert_window_days = COALESCE($6, expiry_alert_window_days),
        stock_count_variance_tolerance_pct = COALESCE($7, stock_count_variance_tolerance_pct),
        sku_editing_enabled = COALESCE($8, sku_editing_enabled),
+       allow_record_edit = COALESCE($9, allow_record_edit),
+       allow_record_delete = COALESCE($10, allow_record_delete),
        updated_at = NOW()
-     WHERE company_id = $9
+     WHERE company_id = $11
      RETURNING *`,
     [
       defaultWarehouseId || null, defaultWarehouseId === null, allowNegativeStock,
       defaultReorderLevel, defaultReorderQuantity, expiryAlertWindowDays, stockCountVarianceTolerancePct,
-      skuEditingEnabled, req.user.companyId,
+      skuEditingEnabled, typeof allowRecordEdit === 'boolean' ? allowRecordEdit : null, typeof allowRecordDelete === 'boolean' ? allowRecordDelete : null, req.user.companyId,
     ]
   );
 

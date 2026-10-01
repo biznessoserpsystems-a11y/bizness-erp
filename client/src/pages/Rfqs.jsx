@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
 import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
+import useProcurementControls from '../hooks/useProcurementControls';
 
 export default function Rfqs() {
   const [rfqs, setRfqs] = useState([]);
@@ -10,6 +12,10 @@ export default function Rfqs() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [detailRfq, setDetailRfq] = useState(null);
+  const [editRfq, setEditRfq] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
+  const confirmDialog = useConfirm();
+  const { showToast } = useToast();
 
   function load() {
     setLoading(true);
@@ -23,6 +29,27 @@ export default function Rfqs() {
   async function openDetail(id) {
     const { data } = await api.get(`/rfqs/${id}`);
     setDetailRfq(data);
+  }
+
+  async function openEdit(id) {
+    try {
+      const { data } = await api.get(`/rfqs/${id}`);
+      setEditRfq(data);
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to load RFQ', 'error');
+    }
+  }
+
+  async function handleDelete(r) {
+    const ok = await confirmDialog(`Delete RFQ ${r.rfq_no}? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/rfqs/${r.id}`);
+      showToast('RFQ deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete RFQ', 'error');
+    }
   }
 
   if (detailRfq) {
@@ -46,7 +73,11 @@ export default function Rfqs() {
                   <td>{r.invited_suppliers.map((s) => s.supplierName).join(', ') || '—'}</td>
                   <td><span className="badge badge-neutral">{r.status}</span></td>
                   <td>{new Date(r.created_at).toLocaleDateString()}</td>
-                  <td><button className="btn btn-secondary btn-sm" onClick={() => openDetail(r.id)}>View</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openDetail(r.id)}>View</button>
+                    {canEdit && ['draft', 'sent'].includes(r.status) && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => openEdit(r.id)}>Edit</button>}
+                    {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(r)}>Delete</button>}
+                  </td>
                 </tr>
               ))}
               {rfqs.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No RFQs yet.</td></tr>}
@@ -55,17 +86,21 @@ export default function Rfqs() {
         )}
       </div>
 
-      {showModal && (
-        <RfqModal suppliers={suppliers} products={products} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      {(showModal || editRfq) && (
+        <RfqModal
+          suppliers={suppliers} products={products} existing={editRfq}
+          onClose={() => { setShowModal(false); setEditRfq(null); }}
+          onSaved={() => { setShowModal(false); setEditRfq(null); load(); }}
+        />
       )}
     </DashboardLayout>
   );
 }
 
-function RfqModal({ suppliers, products, onClose, onSaved }) {
-  const [supplierIds, setSupplierIds] = useState([]);
-  const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState([{ productId: '', quantity: '' }]);
+function RfqModal({ suppliers, products, existing, onClose, onSaved }) {
+  const [supplierIds, setSupplierIds] = useState(existing?.suppliers ? existing.suppliers.map((s) => s.supplier_id) : []);
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [lines, setLines] = useState(existing?.lines?.length ? existing.lines.map((l) => ({ productId: l.product_id, quantity: Number(l.quantity) })) : [{ productId: '', quantity: '' }]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -82,13 +117,15 @@ function RfqModal({ suppliers, products, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/rfqs', {
+      const body = {
         supplierIds, notes,
         lines: lines.filter((l) => l.productId && l.quantity).map((l) => ({ productId: l.productId, quantity: Number(l.quantity) })),
-      });
+      };
+      if (existing) await api.put(`/rfqs/${existing.id}`, body);
+      else await api.post('/rfqs', body);
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create RFQ');
+      setError(err.response?.data?.error || (existing ? 'Failed to update RFQ' : 'Failed to create RFQ'));
     } finally {
       setSubmitting(false);
     }
@@ -97,7 +134,7 @@ function RfqModal({ suppliers, products, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
-        <h2>New RFQ</h2>
+        <h2>{existing ? `Edit RFQ ${existing.rfq_no}` : 'New RFQ'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -127,7 +164,7 @@ function RfqModal({ suppliers, products, onClose, onSaved }) {
           <div className="form-group"><label>Notes</label><input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : 'Send RFQ'}</button>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : existing ? 'Save changes' : 'Send RFQ'}</button>
           </div>
         </form>
       </div>
