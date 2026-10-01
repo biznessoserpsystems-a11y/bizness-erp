@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
+import SimpleEditModal from '../components/SimpleEditModal';
+import useProcurementControls from '../hooks/useProcurementControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 const METHODS = ['cash', 'bank_transfer', 'mobile_money', 'cheque', 'card'];
 
@@ -9,6 +13,10 @@ export default function SupplierPayments() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
 
   function load() {
     setLoading(true);
@@ -19,6 +27,20 @@ export default function SupplierPayments() {
 
   useEffect(load, []);
 
+  async function handleDelete(p) {
+    const ok = await confirm(`Delete payment ${p.payment_no}? The invoices it paid are re-opened and its ledger entry is reversed. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/supplier-payments/${p.id}`);
+      showToast('Payment deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete payment', 'error');
+    }
+  }
+
+  const showActions = canEdit || canDelete;
+
   return (
     <DashboardLayout title="Supplier Payments" breadcrumb={[{ label: 'Accounting & Finance', to: '/accounting' }, { label: 'Payment' }]}>
       <div className="card">
@@ -28,7 +50,7 @@ export default function SupplierPayments() {
         </div>
         {loading ? <p>Loading...</p> : (
           <table>
-            <thead><tr><th>Payment #</th><th>Supplier</th><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Unallocated</th></tr></thead>
+            <thead><tr><th>Payment #</th><th>Supplier</th><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>Unallocated</th>{showActions && <th></th>}</tr></thead>
             <tbody>
               {payments.map((p) => (
                 <tr key={p.id}>
@@ -45,9 +67,15 @@ export default function SupplierPayments() {
                       <span className="badge badge-success">Fully allocated</span>
                     )}
                   </td>
+                  {showActions && (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => setEditPayment(p)}>Edit</button>}
+                      {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(p)}>Delete</button>}
+                    </td>
+                  )}
                 </tr>
               ))}
-              {payments.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No payments recorded yet.</td></tr>}
+              {payments.length === 0 && <tr><td colSpan={showActions ? 8 : 7} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No payments recorded yet.</td></tr>}
             </tbody>
           </table>
         )}
@@ -55,6 +83,21 @@ export default function SupplierPayments() {
 
       {showModal && (
         <PaymentModal suppliers={suppliers} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      )}
+
+      {editPayment && (
+        <SimpleEditModal
+          title={`Edit ${editPayment.payment_no}`}
+          hint="The amount posted to the ledger, so it can't be edited here. To correct it, delete this payment and record it again."
+          fields={[
+            { key: 'paymentMethod', label: 'Payment method', type: 'select', options: METHODS.map((m) => ({ value: m, label: m.replace('_', ' ') })) },
+            { key: 'reference', label: 'Reference' },
+            { key: 'notes', label: 'Notes', type: 'textarea' },
+          ]}
+          initial={{ paymentMethod: editPayment.payment_method, reference: editPayment.reference, notes: editPayment.notes }}
+          onSave={async (v) => { await api.put(`/supplier-payments/${editPayment.id}`, { paymentMethod: v.paymentMethod, reference: v.reference, notes: v.notes }); setEditPayment(null); load(); showToast('Payment updated.', 'success'); }}
+          onClose={() => setEditPayment(null)}
+        />
       )}
     </DashboardLayout>
   );

@@ -48,6 +48,8 @@ const currencyRoutes = require('./routes/currencyRoutes');
 const closingRoutes = require('./routes/closingRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
 const procurementSettingsRoutes = require('./routes/procurementSettingsRoutes');
+const procurementRecordsRoutes = require('./routes/procurementRecordsRoutes');
+const inventoryRecordsRoutes = require('./routes/inventoryRecordsRoutes');
 const backupRoutes = require('./routes/backupRoutes');
 const statutoryComplianceRoutes = require('./routes/statutoryComplianceRoutes');
 const manufacturingRoutes = require('./routes/manufacturingRoutes');
@@ -166,6 +168,8 @@ app.use('/api', currencyRoutes);           // /api/currencies, /api/exchange-rat
 app.use('/api', closingRoutes);        // /api/accounting/fiscal-periods/:id/close, /api/accounting/year-end-close
 app.use('/api', supplierRoutes);       // /api/suppliers
 app.use('/api', procurementSettingsRoutes); // /api/procurement/settings
+app.use('/api', inventoryRecordsRoutes);    // delete for products/brands/categories/warehouses, /api/inventory/record-controls
+app.use('/api', procurementRecordsRoutes);  // edit/delete for procurement records, /api/procurement/record-controls
 app.use('/api', backupRoutes);              // /api/settings/backup, /api/settings/restore
 app.use('/api', accessControlRoutes);       // /api/access-control/sessions, /api/access-control/ip-rules
 app.use('/api', statutoryComplianceRoutes); // /api/statutory-compliance-status, /api/statutory-compliance-items/:id

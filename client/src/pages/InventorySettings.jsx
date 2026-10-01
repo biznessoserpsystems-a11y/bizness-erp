@@ -22,6 +22,8 @@ export default function InventorySettings() {
           expiryAlertWindowDays: s.data.expiry_alert_window_days,
           stockCountVarianceTolerancePct: s.data.stock_count_variance_tolerance_pct,
           skuEditingEnabled: !!s.data.sku_editing_enabled,
+          allowRecordEdit: s.data.allow_record_edit !== false,
+          allowRecordDelete: !!s.data.allow_record_delete,
         });
         setWarehouses(w.data);
       })
@@ -130,6 +132,31 @@ export default function InventorySettings() {
               style={{ width: 'auto' }}
             />
             <label htmlFor="skuEditingEnabled" style={{ margin: 0 }}>Allow editing product SKUs</label>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><h2>Editing and deleting records</h2></div>
+          <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+            These switches apply to products, brands, categories and warehouses. Even when a switch is on, only users
+            whose role has the matching permission will see the buttons. A record can only be deleted if it has never
+            been used: a product, brand, category or warehouse that stock or any document refers to must be deactivated instead.
+          </p>
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox" id="allowRecordEdit" checked={form.allowRecordEdit}
+              onChange={(e) => setForm((f) => ({ ...f, allowRecordEdit: e.target.checked }))}
+              style={{ width: 'auto' }}
+            />
+            <label htmlFor="allowRecordEdit" style={{ margin: 0 }}>Allow editing products, brands, categories and warehouses</label>
+          </div>
+          <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox" id="allowRecordDelete" checked={form.allowRecordDelete}
+              onChange={(e) => setForm((f) => ({ ...f, allowRecordDelete: e.target.checked }))}
+              style={{ width: 'auto' }}
+            />
+            <label htmlFor="allowRecordDelete" style={{ margin: 0 }}>Allow deleting products, brands, categories and warehouses</label>
           </div>
         </div>
 

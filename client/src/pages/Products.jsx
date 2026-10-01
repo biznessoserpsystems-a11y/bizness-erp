@@ -5,10 +5,18 @@ import { useAuth } from '../context/AuthContext';
 import { BarChartWidget, PieChartWidget, formatMoney } from '../components/charts';
 import ProductImage from '../components/ProductImage';
 import AttachmentsPanel from '../components/AttachmentsPanel';
+import useInventoryControls from '../hooks/useInventoryControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 export default function Products() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('inventory.products.manage');
+  const { editEnabled, canDelete } = useInventoryControls();
+  const canEdit = canManage && editEnabled;
+  const showActions = canEdit || (canManage && canDelete);
+  const confirm = useConfirm();
+  const { showToast } = useToast();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -17,6 +25,18 @@ export default function Products() {
   const [modalProduct, setModalProduct] = useState(null);
   const [search, setSearch] = useState('');
   const [view, setView] = useState('list'); // 'list' | 'grid' (picture view)
+
+  async function handleDelete(p) {
+    const ok = await confirm(`Delete "${p.name}" (${p.sku})? This only works for a product that has never been used. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/products/${p.id}`);
+      showToast('Product deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete product', 'error');
+    }
+  }
 
   function load() {
     setLoading(true);
@@ -143,7 +163,7 @@ export default function Products() {
                 <th>Stock value</th>
                 <th>Tracking</th>
                 <th>Status</th>
-                {canManage && <th></th>}
+                {showActions && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -164,18 +184,25 @@ export default function Products() {
                       {p.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  {canManage && (
-                    <td>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setModalProduct(p)}>
-                        Edit
-                      </button>
+                  {showActions && (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {canEdit && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setModalProduct(p)}>
+                          Edit
+                        </button>
+                      )}
+                      {canManage && canDelete && (
+                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(p)}>
+                          Delete
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={showActions ? 9 : 8} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
                     No products found.
                   </td>
                 </tr>

@@ -5,6 +5,8 @@ import LineItemsEditor, { emptyLine } from '../components/LineItemsEditor';
 import { BarChartWidget, PieChartWidget, formatMoney } from '../components/charts';
 import { useConfirm } from '../context/ConfirmContext';
 import { useToast } from '../context/ToastContext';
+import SimpleEditModal from '../components/SimpleEditModal';
+import useProcurementControls from '../hooks/useProcurementControls';
 
 const STATUS_BADGE = {
   draft: 'badge-neutral', issued: 'badge-neutral', partially_paid: 'badge-danger',
@@ -19,6 +21,8 @@ export default function PurchaseInvoices() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [detailInvoice, setDetailInvoice] = useState(null);
+  const [editInvoice, setEditInvoice] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
   const confirm = useConfirm();
   const { showToast } = useToast();
 
@@ -51,6 +55,18 @@ export default function PurchaseInvoices() {
       showToast('Invoice voided.', 'success');
     } catch (err) {
       showToast(err.response?.data?.error || 'Failed to void invoice', 'error');
+    }
+  }
+
+  async function handleDelete(i) {
+    const ok = await confirm(`Delete invoice ${i.invoice_no}? Its ledger entry is reversed. This only works if no payment has been applied. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/purchase-invoices/${i.id}`);
+      showToast('Invoice deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete invoice', 'error');
     }
   }
 
@@ -108,7 +124,11 @@ export default function PurchaseInvoices() {
                   <td>GHS {Number(i.total_amount).toFixed(2)}</td>
                   <td>GHS {Number(i.balance_due).toFixed(2)}</td>
                   <td><span className={`badge ${STATUS_BADGE[i.status]}`}>{i.status.replace('_', ' ')}</span></td>
-                  <td><button className="btn btn-secondary btn-sm" onClick={() => openDetail(i.id)}>View</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openDetail(i.id)}>View</button>
+                    {canEdit && i.status !== 'void' && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => setEditInvoice(i)}>Edit</button>}
+                    {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(i)}>Delete</button>}
+                  </td>
                 </tr>
               ))}
               {invoices.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No invoices yet.</td></tr>}
@@ -119,6 +139,21 @@ export default function PurchaseInvoices() {
 
       {showModal && (
         <InvoiceModal suppliers={suppliers} products={products} orders={orders} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      )}
+
+      {editInvoice && (
+        <SimpleEditModal
+          title={`Edit ${editInvoice.invoice_no}`}
+          hint="Amounts and line items posted to the ledger, so they can't be edited here. To correct them, delete this invoice and enter it again."
+          fields={[
+            { key: 'supplierInvoiceNo', label: 'Supplier reference' },
+            { key: 'dueDate', label: 'Due date', type: 'date' },
+            { key: 'notes', label: 'Notes', type: 'textarea' },
+          ]}
+          initial={{ supplierInvoiceNo: editInvoice.supplier_invoice_no, dueDate: editInvoice.due_date ? String(editInvoice.due_date).slice(0, 10) : '', notes: editInvoice.notes }}
+          onSave={async (v) => { await api.put(`/purchase-invoices/${editInvoice.id}`, { supplierInvoiceNo: v.supplierInvoiceNo, dueDate: v.dueDate || undefined, notes: v.notes }); setEditInvoice(null); load(); showToast('Invoice updated.', 'success'); }}
+          onClose={() => setEditInvoice(null)}
+        />
       )}
     </DashboardLayout>
   );

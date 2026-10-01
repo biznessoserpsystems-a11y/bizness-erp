@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
+import useProcurementControls from '../hooks/useProcurementControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 const STATUS_BADGE = { draft: 'badge-neutral', submitted: 'badge-neutral', approved: 'badge-success', rejected: 'badge-danger', converted: 'badge-success' };
 
@@ -10,6 +13,10 @@ export default function Requisitions() {
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editRequisition, setEditRequisition] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
 
   function load() {
     setLoading(true);
@@ -23,6 +30,27 @@ export default function Requisitions() {
   async function updateStatus(id, status) {
     await api.patch(`/requisitions/${id}/status`, { status });
     load();
+  }
+
+  async function openEdit(id) {
+    try {
+      const { data } = await api.get(`/requisitions/${id}`);
+      setEditRequisition(data);
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to load requisition', 'error');
+    }
+  }
+
+  async function handleDelete(r) {
+    const ok = await confirm(`Delete requisition ${r.requisition_no}? This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/requisitions/${r.id}`);
+      showToast('Requisition deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete requisition', 'error');
+    }
   }
 
   return (
@@ -50,6 +78,10 @@ export default function Requisitions() {
                         <button className="btn btn-danger btn-sm" onClick={() => updateStatus(r.id, 'rejected')}>Reject</button>
                       </>
                     )}
+                    {canEdit && ['draft', 'submitted', 'rejected'].includes(r.status) && (
+                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => openEdit(r.id)}>Edit</button>
+                    )}
+                    {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(r)}>Delete</button>}
                   </td>
                 </tr>
               ))}
@@ -59,17 +91,21 @@ export default function Requisitions() {
         )}
       </div>
 
-      {showModal && (
-        <RequisitionModal products={products} warehouses={warehouses} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      {(showModal || editRequisition) && (
+        <RequisitionModal
+          products={products} warehouses={warehouses} existing={editRequisition}
+          onClose={() => { setShowModal(false); setEditRequisition(null); }}
+          onSaved={() => { setShowModal(false); setEditRequisition(null); load(); }}
+        />
       )}
     </DashboardLayout>
   );
 }
 
-function RequisitionModal({ products, warehouses, onClose, onSaved }) {
-  const [warehouseId, setWarehouseId] = useState('');
-  const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState([{ productId: '', quantity: '' }]);
+function RequisitionModal({ products, warehouses, existing, onClose, onSaved }) {
+  const [warehouseId, setWarehouseId] = useState(existing?.warehouse_id || '');
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [lines, setLines] = useState(existing?.lines?.length ? existing.lines.map((l) => ({ productId: l.product_id, quantity: Number(l.quantity) })) : [{ productId: '', quantity: '' }]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -84,13 +120,15 @@ function RequisitionModal({ products, warehouses, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/requisitions', {
+      const body = {
         warehouseId, notes,
         lines: lines.filter((l) => l.productId && l.quantity).map((l) => ({ productId: l.productId, quantity: Number(l.quantity) })),
-      });
+      };
+      if (existing) await api.put(`/requisitions/${existing.id}`, body);
+      else await api.post('/requisitions', body);
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create requisition');
+      setError(err.response?.data?.error || (existing ? 'Failed to update requisition' : 'Failed to create requisition'));
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +137,7 @@ function RequisitionModal({ products, warehouses, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
-        <h2>New purchase requisition</h2>
+        <h2>{existing ? `Edit requisition ${existing.requisition_no}` : 'New purchase requisition'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -126,7 +164,7 @@ function RequisitionModal({ products, warehouses, onClose, onSaved }) {
           <div className="form-group"><label>Notes</label><input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : 'Submit requisition'}</button>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : existing ? 'Save changes' : 'Submit requisition'}</button>
           </div>
         </form>
       </div>

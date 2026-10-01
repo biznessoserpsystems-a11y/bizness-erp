@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
+import SimpleEditModal from '../components/SimpleEditModal';
+import useProcurementControls from '../hooks/useProcurementControls';
+import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 
 export default function Grns() {
   const [grns, setGrns] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editGrn, setEditGrn] = useState(null);
+  const { canEdit, canDelete } = useProcurementControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
 
   function load() {
     setLoading(true);
@@ -20,6 +28,20 @@ export default function Grns() {
 
   useEffect(load, []);
 
+  async function handleDelete(g) {
+    const ok = await confirm(`Delete ${g.grn_no}? The received stock is taken back out of the warehouse and its ledger entry is reversed. This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      await api.delete(`/grns/${g.id}`);
+      showToast('Goods received note deleted.', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete goods received note', 'error');
+    }
+  }
+
+  const showActions = canEdit || canDelete;
+
   return (
     <DashboardLayout title="Goods Received Notes">
       <div className="card">
@@ -29,7 +51,7 @@ export default function Grns() {
         </div>
         {loading ? <p>Loading...</p> : (
           <table>
-            <thead><tr><th>GRN #</th><th>Order #</th><th>Supplier</th><th>Warehouse</th><th>Items</th><th>Date</th></tr></thead>
+            <thead><tr><th>GRN #</th><th>Order #</th><th>Supplier</th><th>Warehouse</th><th>Items</th><th>Date</th>{showActions && <th></th>}</tr></thead>
             <tbody>
               {grns.map((g) => (
                 <tr key={g.id}>
@@ -39,9 +61,15 @@ export default function Grns() {
                   <td>{g.warehouse_name}</td>
                   <td>{g.lines.map((l) => `${l.productName} (${l.quantity})`).join(', ')}</td>
                   <td>{new Date(g.created_at).toLocaleString()}</td>
+                  {showActions && (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => setEditGrn(g)}>Edit note</button>}
+                      {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(g)}>Delete</button>}
+                    </td>
+                  )}
                 </tr>
               ))}
-              {grns.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No goods received yet.</td></tr>}
+              {grns.length === 0 && <tr><td colSpan={showActions ? 7 : 6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No goods received yet.</td></tr>}
             </tbody>
           </table>
         )}
@@ -49,6 +77,17 @@ export default function Grns() {
 
       {showModal && (
         <GrnModal orders={orders} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />
+      )}
+
+      {editGrn && (
+        <SimpleEditModal
+          title={`Edit ${editGrn.grn_no}`}
+          hint="Quantities and costs posted stock and ledger entries, so they can't be edited here. To correct them, delete this note and receive the goods again."
+          fields={[{ key: 'notes', label: 'Notes', type: 'textarea' }]}
+          initial={{ notes: editGrn.notes }}
+          onSave={async (v) => { await api.put(`/grns/${editGrn.id}`, { notes: v.notes }); setEditGrn(null); load(); showToast('Goods received note updated.', 'success'); }}
+          onClose={() => setEditGrn(null)}
+        />
       )}
     </DashboardLayout>
   );
