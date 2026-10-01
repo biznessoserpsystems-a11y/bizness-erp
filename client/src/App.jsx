@@ -49,6 +49,7 @@ import ManagementAccountReport from './pages/ManagementAccountReport';
 import Banking from './pages/Banking';
 import BankReconciliationStatement from './pages/BankReconciliationStatement';
 import PettyCash from './pages/PettyCash';
+import PettyCashSettings from './pages/PettyCashSettings';
 import Budgets from './pages/Budgets';
 import ProcurementBudget from './pages/ProcurementBudget';
 import SalesBudget from './pages/SalesBudget';
@@ -163,6 +164,10 @@ export default function App() {
             <AccessControl />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/settings/petty-cash"
+        element={<ProtectedRoute requirePermission="accounting.petty_cash.settings"><PettyCashSettings /></ProtectedRoute>}
       />
       <Route
         path="/settings/theme"

@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { BarChartWidget, PieChartWidget, formatMoney } from '../components/charts';
 
 export default function PettyCash() {
+  const { hasPermission } = useAuth();
+  const [pcSettings, setPcSettings] = useState({ allow_edit: false, allow_delete: false });
+  const canEdit = hasPermission('accounting.petty_cash.edit') && pcSettings.allow_edit;
+  const canDelete = hasPermission('accounting.petty_cash.delete') && pcSettings.allow_delete;
+  const [editAccount, setEditAccount] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [glAccounts, setGlAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12,15 +18,26 @@ export default function PettyCash() {
 
   function load() {
     setLoading(true);
-    Promise.all([api.get('/petty-cash-accounts'), api.get('/chart-of-accounts')])
-      .then(([p, c]) => {
+    Promise.all([api.get('/petty-cash-accounts'), api.get('/chart-of-accounts'), api.get('/petty-cash/settings').catch(() => ({ data: { allow_edit: false, allow_delete: false } }))])
+      .then(([p, c, st]) => {
         setAccounts(p.data);
         setGlAccounts(c.data);
+        setPcSettings(st.data);
       })
       .finally(() => setLoading(false));
   }
 
   useEffect(load, []);
+
+  async function deleteAccount(account) {
+    if (!window.confirm(`Delete petty cash account "${account.name}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/petty-cash-accounts/${account.id}`);
+      load();
+    } catch (err) {
+      window.alert(err.response?.data?.error || 'Failed to delete account');
+    }
+  }
 
   async function openDetail(account) {
     const [vouchersRes, receiptsRes] = await Promise.all([
@@ -31,7 +48,7 @@ export default function PettyCash() {
   }
 
   if (detail) {
-    return <PettyCashDetailView detail={detail} glAccounts={glAccounts} onBack={() => { setDetail(null); load(); }} onRefresh={() => openDetail(detail.account)} />;
+    return <PettyCashDetailView canEdit={canEdit} canDelete={canDelete} detail={detail} glAccounts={glAccounts} onBack={() => { setDetail(null); load(); }} onRefresh={() => openDetail(detail.account)} />;
   }
 
   return (
@@ -62,7 +79,11 @@ export default function PettyCash() {
                   <td>GHS {Number(a.total_receipts).toFixed(2)}</td>
                   <td>GHS {Number(a.total_spent).toFixed(2)}</td>
                   <td><span className={`badge ${Number(a.balance) > 0 ? 'badge-success' : 'badge-danger'}`}>GHS {Number(a.balance).toFixed(2)}</span></td>
-                  <td><button className="btn btn-secondary btn-sm" onClick={() => openDetail(a)}>Vouchers</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openDetail(a)}>Vouchers</button>
+                    {canEdit && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => setEditAccount(a)}>Edit</button>}
+                    {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => deleteAccount(a)}>Delete</button>}
+                  </td>
                 </tr>
               ))}
               {accounts.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No petty cash accounts yet.</td></tr>}
@@ -71,14 +92,25 @@ export default function PettyCash() {
         )}
       </div>
 
-      {showModal && <PettyCashModal glAccounts={glAccounts} onClose={() => setShowModal(false)} onSaved={() => { setShowModal(false); load(); }} />}
+      {(showModal || editAccount) && (
+        <PettyCashModal
+          glAccounts={glAccounts}
+          existing={editAccount}
+          onClose={() => { setShowModal(false); setEditAccount(null); }}
+          onSaved={() => { setShowModal(false); setEditAccount(null); load(); }}
+        />
+      )}
     </DashboardLayout>
   );
 }
 
-function PettyCashModal({ glAccounts, onClose, onSaved }) {
+function PettyCashModal({ glAccounts, existing, onClose, onSaved }) {
   const assetAccounts = glAccounts.filter((a) => a.account_type === 'asset');
-  const [form, setForm] = useState({ accountId: '', name: '', floatAmount: '' });
+  const [form, setForm] = useState({
+    accountId: existing?.account_id || '',
+    name: existing?.name || '',
+    floatAmount: existing ? existing.float_amount : '',
+  });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -87,10 +119,18 @@ function PettyCashModal({ glAccounts, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/petty-cash-accounts', { ...form, floatAmount: Number(form.floatAmount) || 0 });
+      if (existing) {
+        await api.put(`/petty-cash-accounts/${existing.id}`, {
+          name: form.name,
+          floatAmount: Number(form.floatAmount) || 0,
+          custodianUserId: existing.custodian_user_id || null,
+        });
+      } else {
+        await api.post('/petty-cash-accounts', { ...form, floatAmount: Number(form.floatAmount) || 0 });
+      }
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create account');
+      setError(err.response?.data?.error || (existing ? 'Failed to update account' : 'Failed to create account'));
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +139,7 @@ function PettyCashModal({ glAccounts, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add petty cash account</h2>
+        <h2>{existing ? 'Edit petty cash account' : 'Add petty cash account'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -108,7 +148,7 @@ function PettyCashModal({ glAccounts, onClose, onSaved }) {
           </div>
           <div className="form-group">
             <label>Linked GL cash account</label>
-            <select value={form.accountId} onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))} required>
+            <select value={form.accountId} onChange={(e) => setForm((f) => ({ ...f, accountId: e.target.value }))} required disabled={!!existing}>
               <option value="">Select</option>
               {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.account_code} — {a.account_name}</option>)}
             </select>
@@ -127,11 +167,24 @@ function PettyCashModal({ glAccounts, onClose, onSaved }) {
   );
 }
 
-function PettyCashDetailView({ detail, glAccounts, onBack, onRefresh }) {
+function PettyCashDetailView({ canEdit, canDelete, detail, glAccounts, onBack, onRefresh }) {
   const expenseAccounts = glAccounts.filter((a) => a.account_type === 'expense');
   const [section, setSection] = useState('vouchers');
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [editVoucher, setEditVoucher] = useState(null);
+  const [editReceipt, setEditReceipt] = useState(null);
+  const showActions = canEdit || canDelete;
+
+  async function removeRecord(kind, record, label) {
+    if (!window.confirm(`Delete ${kind} ${label}? Its ledger entry will be reversed. This cannot be undone.`)) return;
+    try {
+      await api.delete(`/petty-cash-accounts/${detail.account.id}/${kind === 'voucher' ? 'vouchers' : 'receipts'}/${record.id}`);
+      onRefresh();
+    } catch (err) {
+      window.alert(err.response?.data?.error || `Failed to delete ${kind}`);
+    }
+  }
   const [bankAccounts, setBankAccounts] = useState([]);
 
   useEffect(() => { api.get('/bank-accounts').then(({ data }) => setBankAccounts(data)).catch(() => setBankAccounts([])); }, []);
@@ -172,7 +225,7 @@ function PettyCashDetailView({ detail, glAccounts, onBack, onRefresh }) {
           <>
             <div className="card-header"><h3 style={{ margin: 0 }}>Payments (Expenses)</h3><button className="btn btn-primary btn-sm" style={{ width: 'auto' }} onClick={() => setShowVoucherModal(true)}>+ New Payment</button></div>
             <table>
-              <thead><tr><th>Voucher #</th><th>Date</th><th>Payee</th><th>Description</th><th>Expense account</th><th>Amount</th></tr></thead>
+              <thead><tr><th>Voucher #</th><th>Date</th><th>Payee</th><th>Description</th><th>Expense account</th><th>Amount</th>{showActions && <th></th>}</tr></thead>
               <tbody>
                 {detail.vouchers.map((v) => (
                   <tr key={v.id}>
@@ -182,9 +235,15 @@ function PettyCashDetailView({ detail, glAccounts, onBack, onRefresh }) {
                     <td>{v.description}</td>
                     <td>{v.expense_account_name}</td>
                     <td>GHS {Number(v.amount).toFixed(2)}</td>
+                    {showActions && (
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => setEditVoucher(v)}>Edit</button>}
+                        {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => removeRecord('voucher', v, v.voucher_no)}>Delete</button>}
+                      </td>
+                    )}
                   </tr>
                 ))}
-                {detail.vouchers.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No payments yet.</td></tr>}
+                {detail.vouchers.length === 0 && <tr><td colSpan={showActions ? 7 : 6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No payments yet.</td></tr>}
               </tbody>
             </table>
           </>
@@ -194,7 +253,7 @@ function PettyCashDetailView({ detail, glAccounts, onBack, onRefresh }) {
           <>
             <div className="card-header"><h3 style={{ margin: 0 }}>Receipts</h3><button className="btn btn-primary btn-sm" style={{ width: 'auto' }} onClick={() => setShowReceiptModal(true)}>+ New Receipt</button></div>
             <table>
-              <thead><tr><th>Receipt #</th><th>Date</th><th>Received From</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead>
+              <thead><tr><th>Receipt #</th><th>Date</th><th>Received From</th><th>Method</th><th>Reference</th><th>Amount</th>{showActions && <th></th>}</tr></thead>
               <tbody>
                 {detail.receipts.map((r) => (
                   <tr key={r.id}>
@@ -204,37 +263,51 @@ function PettyCashDetailView({ detail, glAccounts, onBack, onRefresh }) {
                     <td style={{ textTransform: 'capitalize' }}>{r.payment_method.replace('_', ' ')}{r.bank_name ? ` — ${r.bank_name}` : ''}</td>
                     <td>{r.reference_no || '—'}</td>
                     <td>GHS {Number(r.amount).toFixed(2)}</td>
+                    {showActions && (
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {canEdit && <button className="btn btn-secondary btn-sm" onClick={() => setEditReceipt(r)}>Edit</button>}
+                        {canDelete && <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => removeRecord('receipt', r, r.receipt_no)}>Delete</button>}
+                      </td>
+                    )}
                   </tr>
                 ))}
-                {detail.receipts.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No receipts yet.</td></tr>}
+                {detail.receipts.length === 0 && <tr><td colSpan={showActions ? 7 : 6} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>No receipts yet.</td></tr>}
               </tbody>
             </table>
           </>
         )}
       </div>
 
-      {showVoucherModal && (
+      {(showVoucherModal || editVoucher) && (
         <VoucherModal
           accountId={detail.account.id}
           expenseAccounts={expenseAccounts}
-          onClose={() => setShowVoucherModal(false)}
-          onSaved={() => { setShowVoucherModal(false); onRefresh(); }}
+          existing={editVoucher}
+          onClose={() => { setShowVoucherModal(false); setEditVoucher(null); }}
+          onSaved={() => { setShowVoucherModal(false); setEditVoucher(null); onRefresh(); }}
         />
       )}
-      {showReceiptModal && (
+      {(showReceiptModal || editReceipt) && (
         <ReceiptModal
           accountId={detail.account.id}
           bankAccounts={bankAccounts}
-          onClose={() => setShowReceiptModal(false)}
-          onSaved={() => { setShowReceiptModal(false); onRefresh(); }}
+          existing={editReceipt}
+          onClose={() => { setShowReceiptModal(false); setEditReceipt(null); }}
+          onSaved={() => { setShowReceiptModal(false); setEditReceipt(null); onRefresh(); }}
         />
       )}
     </DashboardLayout>
   );
 }
 
-function VoucherModal({ accountId, expenseAccounts, onClose, onSaved }) {
-  const [form, setForm] = useState({ payee: '', description: '', amount: '', expenseAccountId: '' });
+function VoucherModal({ accountId, expenseAccounts, existing, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    payee: existing?.payee || '',
+    description: existing?.description || '',
+    amount: existing ? existing.amount : '',
+    expenseAccountId: existing?.expense_account_id || '',
+    voucherDate: existing?.voucher_date ? String(existing.voucher_date).slice(0, 10) : '',
+  });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -243,10 +316,15 @@ function VoucherModal({ accountId, expenseAccounts, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post(`/petty-cash-accounts/${accountId}/vouchers`, { ...form, amount: Number(form.amount) });
+      if (existing) {
+        await api.put(`/petty-cash-accounts/${accountId}/vouchers/${existing.id}`, { ...form, amount: Number(form.amount), voucherDate: form.voucherDate || undefined });
+      } else {
+        const { voucherDate, ...createBody } = form;
+        await api.post(`/petty-cash-accounts/${accountId}/vouchers`, { ...createBody, amount: Number(form.amount) });
+      }
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create voucher');
+      setError(err.response?.data?.error || (existing ? 'Failed to update voucher' : 'Failed to create voucher'));
     } finally {
       setSubmitting(false);
     }
@@ -255,9 +333,15 @@ function VoucherModal({ accountId, expenseAccounts, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New petty cash voucher</h2>
+        <h2>{existing ? `Edit voucher ${existing.voucher_no}` : 'New petty cash voucher'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
+          {existing && (
+            <div className="form-group">
+              <label>Date</label>
+              <input type="date" value={form.voucherDate} onChange={(e) => setForm((f) => ({ ...f, voucherDate: e.target.value }))} />
+            </div>
+          )}
           <div className="form-group">
             <label>Payee</label>
             <input value={form.payee} onChange={(e) => setForm((f) => ({ ...f, payee: e.target.value }))} />
@@ -279,7 +363,7 @@ function VoucherModal({ accountId, expenseAccounts, onClose, onSaved }) {
           </div>
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : 'Save voucher'}</button>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : existing ? 'Save changes' : 'Save voucher'}</button>
           </div>
         </form>
       </div>
@@ -287,8 +371,15 @@ function VoucherModal({ accountId, expenseAccounts, onClose, onSaved }) {
   );
 }
 
-function ReceiptModal({ accountId, bankAccounts, onClose, onSaved }) {
-  const [form, setForm] = useState({ receivedFrom: '', paymentMethod: 'cash', bankAccountId: '', referenceNo: '', amount: '' });
+function ReceiptModal({ accountId, bankAccounts, existing, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    receivedFrom: existing?.received_from || '',
+    paymentMethod: existing?.payment_method || 'cash',
+    bankAccountId: existing?.bank_account_id || '',
+    referenceNo: existing?.reference_no || '',
+    amount: existing ? existing.amount : '',
+    receiptDate: existing?.receipt_date ? String(existing.receipt_date).slice(0, 10) : '',
+  });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const needsBankAccount = form.paymentMethod !== 'cash';
@@ -298,10 +389,16 @@ function ReceiptModal({ accountId, bankAccounts, onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post(`/petty-cash-accounts/${accountId}/receipts`, { ...form, amount: Number(form.amount), bankAccountId: needsBankAccount ? form.bankAccountId : null });
+      const body = { ...form, amount: Number(form.amount), bankAccountId: needsBankAccount ? form.bankAccountId : null };
+      if (existing) {
+        await api.put(`/petty-cash-accounts/${accountId}/receipts/${existing.id}`, { ...body, receiptDate: form.receiptDate || undefined });
+      } else {
+        delete body.receiptDate;
+        await api.post(`/petty-cash-accounts/${accountId}/receipts`, body);
+      }
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to record receipt');
+      setError(err.response?.data?.error || (existing ? 'Failed to update receipt' : 'Failed to record receipt'));
     } finally {
       setSubmitting(false);
     }
@@ -310,9 +407,15 @@ function ReceiptModal({ accountId, bankAccounts, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New petty cash receipt</h2>
+        <h2>{existing ? `Edit receipt ${existing.receipt_no}` : 'New petty cash receipt'}</h2>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit}>
+          {existing && (
+            <div className="form-group">
+              <label>Date</label>
+              <input type="date" value={form.receiptDate} onChange={(e) => setForm((f) => ({ ...f, receiptDate: e.target.value }))} />
+            </div>
+          )}
           <div className="form-group">
             <label>Received from</label>
             <input value={form.receivedFrom} onChange={(e) => setForm((f) => ({ ...f, receivedFrom: e.target.value }))} placeholder="e.g. Owner top-up, Main Cashier" />
@@ -346,7 +449,7 @@ function ReceiptModal({ accountId, bankAccounts, onClose, onSaved }) {
           </div>
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : 'Save receipt'}</button>
+            <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>{submitting ? 'Saving...' : existing ? 'Save changes' : 'Save receipt'}</button>
           </div>
         </form>
       </div>
