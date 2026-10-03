@@ -20,4 +20,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Start your server
-CMD [ "node", "src/server.js" ]
+CMD ["sh", "-c", "node src/migrations/run.js && node src/server.js"]
