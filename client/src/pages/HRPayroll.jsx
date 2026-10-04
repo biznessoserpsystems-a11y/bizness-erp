@@ -4,6 +4,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { useToast } from '../context/ToastContext';
+import usePayrollControls from '../hooks/usePayrollControls';
 import { BarChartWidget, LineChartWidget, PieChartWidget, formatMoney } from '../components/charts';
 import AttachmentsPanel from '../components/AttachmentsPanel';
 import { EmptyState } from '../Style';
@@ -1893,6 +1894,10 @@ function HRReportsTab() {
 function PayrollTab() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('hr.payroll.manage');
+  const { canEdit, canDelete } = usePayrollControls();
+  const confirm = useConfirm();
+  const { showToast } = useToast();
+  const [editRun, setEditRun] = useState(null);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1906,6 +1911,24 @@ function PayrollTab() {
   }
 
   useEffect(load, []);
+
+  async function handleDelete(r) {
+    const label = `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`;
+    const effects = {
+      draft: 'It has no payslips yet.',
+      processed: 'Its payslips are deleted and its ledger entry is reversed.',
+      paid: 'Its payslips are deleted and BOTH its payment and its ledger entry are reversed. Salaries already paid out stay paid in real life, so only do this to correct a mistake.',
+    }[r.status] || '';
+    const ok = await confirm(`Delete the ${label} payroll run? ${effects} This cannot be undone.`, { danger: true, confirmLabel: 'Delete' });
+    if (!ok) return;
+    try {
+      const { data } = await api.delete(`/payroll-runs/${r.id}`);
+      showToast(data.note ? `Payroll run deleted. ${data.note}` : 'Payroll run deleted.', data.note ? 'info' : 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete payroll run', 'error');
+    }
+  }
 
   if (detailId) {
     return <PayrollRunDetail id={detailId} canManage={canManage} onBack={() => { setDetailId(null); load(); }} />;
@@ -1956,8 +1979,14 @@ function PayrollTab() {
                 <td><span className={`badge ${STATUS_BADGE[r.status] || 'badge-neutral'}`}>{r.status}</span></td>
                 <td>{money(r.total_gross)}</td>
                 <td>{money(r.total_net)}</td>
-                <td>
+                <td style={{ whiteSpace: 'nowrap' }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => setDetailId(r.id)}>View</button>
+                  {canEdit && r.status !== 'paid' && (
+                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => setEditRun(r)}>Edit</button>
+                  )}
+                  {canDelete && (
+                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, color: 'var(--color-danger, #B3261E)' }} onClick={() => handleDelete(r)}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1965,10 +1994,11 @@ function PayrollTab() {
         </table>
       )}
 
-      {modalOpen && (
+      {(modalOpen || editRun) && (
         <PayrollRunModal
-          onClose={() => setModalOpen(false)}
-          onSaved={() => { setModalOpen(false); load(); }}
+          existing={editRun}
+          onClose={() => { setModalOpen(false); setEditRun(null); }}
+          onSaved={() => { setModalOpen(false); setEditRun(null); load(); }}
         />
       )}
       {autoRunModalOpen && (
@@ -1979,12 +2009,13 @@ function PayrollTab() {
   );
 }
 
-function PayrollRunModal({ onClose, onSaved }) {
+function PayrollRunModal({ existing, onClose, onSaved }) {
   const now = new Date();
-  const [periodMonth, setPeriodMonth] = useState(now.getMonth() + 1);
-  const [periodYear, setPeriodYear] = useState(now.getFullYear());
-  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
-  const [bankAccountId, setBankAccountId] = useState('');
+  const [periodMonth, setPeriodMonth] = useState(existing ? existing.period_month : now.getMonth() + 1);
+  const [periodYear, setPeriodYear] = useState(existing ? existing.period_year : now.getFullYear());
+  const [paymentMethod, setPaymentMethod] = useState(existing?.payment_method || 'bank_transfer');
+  const [bankAccountId, setBankAccountId] = useState(existing?.bank_account_id || '');
+  const periodLocked = !!existing && existing.status !== 'draft';
   const [bankAccounts, setBankAccounts] = useState([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -2000,13 +2031,15 @@ function PayrollRunModal({ onClose, onSaved }) {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/payroll-runs', {
+      const body = {
         periodMonth: Number(periodMonth), periodYear: Number(periodYear),
         paymentMethod, bankAccountId: needsBankAccount && bankAccountId ? bankAccountId : null,
-      });
+      };
+      if (existing) await api.put(`/payroll-runs/${existing.id}`, body);
+      else await api.post('/payroll-runs', body);
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create payroll run');
+      setError(err.response?.data?.error || (existing ? 'Failed to update payroll run' : 'Failed to create payroll run'));
     } finally {
       setSubmitting(false);
     }
@@ -2015,7 +2048,12 @@ function PayrollRunModal({ onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New payroll run</h2>
+        <h2>{existing ? `Edit payroll run — ${MONTH_NAMES[existing.period_month - 1]} ${existing.period_year}` : 'New payroll run'}</h2>
+        {periodLocked && (
+          <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)', marginTop: -8 }}>
+            This run has been processed, so its month and year are locked. You can still change how it will be paid. To change the period, delete the run and create it again.
+          </p>
+        )}
         <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)', marginTop: -8 }}>
           Only full-time employees are included when this run is processed — contract, part-time, internship,
           and trainee staff are excluded, since they're often compensated differently and shouldn't be run
@@ -2025,13 +2063,13 @@ function PayrollRunModal({ onClose, onSaved }) {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Month</label>
-            <select value={periodMonth} onChange={(e) => setPeriodMonth(e.target.value)}>
+            <select value={periodMonth} onChange={(e) => setPeriodMonth(e.target.value)} disabled={periodLocked}>
               {MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
             </select>
           </div>
           <div className="form-group">
             <label>Year</label>
-            <input type="number" value={periodYear} onChange={(e) => setPeriodYear(e.target.value)} />
+            <input type="number" value={periodYear} onChange={(e) => setPeriodYear(e.target.value)} disabled={periodLocked} />
           </div>
           <div className="form-group">
             <label>Payment option</label>
@@ -2058,7 +2096,7 @@ function PayrollRunModal({ onClose, onSaved }) {
           <div className="modal-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={submitting}>
-              {submitting ? 'Creating...' : 'Create run'}
+              {submitting ? 'Saving...' : existing ? 'Save changes' : 'Create run'}
             </button>
           </div>
         </form>
