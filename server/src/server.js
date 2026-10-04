@@ -70,6 +70,7 @@ const procurementReportRoutes = require('./routes/procurementReportRoutes');
 const communicationRoutes = require('./routes/communicationRoutes');
 const crmRoutes = require('./routes/crmRoutes');
 const hrPayrollRoutes = require('./routes/hrPayrollRoutes');
+const payrollRecordsRoutes = require('./routes/payrollRecordsRoutes');
 const hrReportRoutes = require('./routes/hrReportRoutes');
 const supplierContactRoutes = require('./routes/supplierContactRoutes');
 const supplierCommunicationRoutes = require('./routes/supplierCommunicationRoutes');
@@ -191,6 +192,7 @@ app.use('/api', procurementReportRoutes); // /api/procurement-reports/*
 app.use('/api', communicationRoutes);     // /api/notifications, /api/communication-logs, /api/announcements
 app.use('/api', crmRoutes);                // /api/leads, /api/contacts, /api/activities
 app.use('/api', hrPayrollRoutes);         // /api/employees, /api/leave-requests, /api/payroll-runs
+app.use('/api', payrollRecordsRoutes);   // edit/delete for payroll runs (mounted after hrPayrollRoutes so its fixed paths win), /api/payroll/record-controls
 app.use('/api', hrReportRoutes);          // /api/hr-reports/headcount-summary, /api/hr-reports/payroll-cost-trend
 app.use('/api', supplierContactRoutes);       // /api/suppliers/:id/contacts
 app.use('/api', supplierCommunicationRoutes); // /api/suppliers/:id/communications

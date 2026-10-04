@@ -11,8 +11,13 @@ export default function HRPayrollSettings() {
   const [savingRates, setSavingRates] = useState(false);
   const [savingBands, setSavingBands] = useState(false);
   const [error, setError] = useState('');
+  const [controls, setControls] = useState(null);
+  const [savingControls, setSavingControls] = useState(false);
 
   function load() {
+    api.get('/payroll/record-controls')
+      .then(({ data }) => setControls({ allowRecordEdit: !!data.allow_edit, allowRecordDelete: !!data.allow_delete }))
+      .catch(() => setControls(null));
     api.get('/payroll-settings').then(({ data }) => {
       setSettings(data);
       setRatesForm({
@@ -48,6 +53,19 @@ export default function HRPayrollSettings() {
       setError(err.response?.data?.error || 'Failed to save statutory rates');
     } finally {
       setSavingRates(false);
+    }
+  }
+
+  async function saveControls(e) {
+    e.preventDefault();
+    setSavingControls(true);
+    try {
+      await api.put('/payroll/record-controls', controls);
+      showToast('Payroll editing and deleting settings saved.', 'success');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save payroll editing and deleting settings');
+    } finally {
+      setSavingControls(false);
     }
   }
 
@@ -208,6 +226,41 @@ export default function HRPayrollSettings() {
           </button>
         </div>
       </div>
+
+      {controls && (
+        <form onSubmit={saveControls}>
+          <div className="card">
+            <div className="card-header"><h2>Editing and deleting payroll runs</h2></div>
+            <p style={{ fontSize: 12.5, color: 'var(--color-text-muted)' }}>
+              These switches apply to the monthly wages and salary runs on the Payroll tab. Even when a switch is on, only
+              users whose role has the matching permission (edit or delete) will see the buttons. A run that has been paid
+              can't be edited. Deleting a run removes its payslips and reverses its ledger entries (including the payment,
+              if it was paid), and it can't be undone. Deleting also changes what the PAYE and SSNIT reports show for that month.
+            </p>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox" id="allowPayrollEdit" checked={controls.allowRecordEdit}
+                onChange={(e) => setControls((c) => ({ ...c, allowRecordEdit: e.target.checked }))}
+                style={{ width: 'auto' }}
+              />
+              <label htmlFor="allowPayrollEdit" style={{ margin: 0 }}>Allow editing payroll runs</label>
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox" id="allowPayrollDelete" checked={controls.allowRecordDelete}
+                onChange={(e) => setControls((c) => ({ ...c, allowRecordDelete: e.target.checked }))}
+                style={{ width: 'auto' }}
+              />
+              <label htmlFor="allowPayrollDelete" style={{ margin: 0 }}>Allow deleting payroll runs</label>
+            </div>
+            <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
+              <button type="submit" className="btn btn-primary" style={{ width: 'auto' }} disabled={savingControls}>
+                {savingControls ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
     </DashboardLayout>
   );
 }
