@@ -369,7 +369,7 @@ function multiTableToPdf({ title, subtitle, tables }) {
 // A single employee's payslip — a bespoke layout (company header, employee
 // details, earnings, deductions, net pay), not the generic table/statement
 // shape the report exports use, since a payslip has its own fixed structure.
-function payslipToPdf({ companyName, employee, run, payslip }) {
+function payslipToPdf({ companyName, employee, run, payslip, currency }) {
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
@@ -387,6 +387,7 @@ function payslipToPdf({ companyName, employee, run, payslip }) {
   if (employee.job_title) doc.text(`Position: ${employee.job_title}`);
   if (employee.ssnit_number) doc.text(`SSNIT No.: ${employee.ssnit_number}`);
   if (employee.tin_number) doc.text(`TIN: ${employee.tin_number}`);
+  if (currency) doc.font('Helvetica').fillColor('#726B5C').text(`All amounts in ${currency}`).fillColor('#221F1A').font('Helvetica-Bold');
   doc.moveDown();
   doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#E7E0D2').stroke();
   doc.moveDown(0.5);
@@ -396,6 +397,7 @@ function payslipToPdf({ companyName, employee, run, payslip }) {
     doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10);
     doc.text(label, left, y, { width: contentWidth * 0.6 });
     doc.text(fmtCell(amount, 'currency'), left + contentWidth * 0.6, y, { width: contentWidth * 0.4, align: 'right' });
+    doc.x = left; // the right-aligned amount moves the cursor; put it back so headings and the footer start at the margin
     doc.moveDown(0.6);
   }
 
@@ -411,6 +413,7 @@ function payslipToPdf({ companyName, employee, run, payslip }) {
   doc.font('Helvetica-Bold').fontSize(11).text('Deductions');
   doc.moveDown(0.3);
   if (Number(payslip.ssnit_employee) > 0) line('SSNIT (Employee)', payslip.ssnit_employee);
+  if (Number(payslip.tier3_employee) > 0) line('Tier 3 Pension (Employee)', payslip.tier3_employee);
   if (Number(payslip.income_tax) > 0) line('PAYE (Income Tax)', payslip.income_tax);
   if (Number(payslip.withholding_tax) > 0) line('Withholding Tax', payslip.withholding_tax);
   if (Number(payslip.other_deductions) > 0) line('Other Deductions', payslip.other_deductions);

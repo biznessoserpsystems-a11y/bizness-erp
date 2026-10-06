@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ess = require('../controllers/essController');
+const payslipController = require('../controllers/payslipController');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 
@@ -8,6 +9,7 @@ router.use(authenticate);
 
 router.get('/me/employee', ess.getMyEmployee);
 router.get('/me/payslips', ess.getMyPayslips);
+router.get('/me/payslips/:id/pdf', payslipController.downloadMyPayslip);
 router.get('/me/leave-balance', ess.getMyLeaveBalance);
 
 router.get('/timesheets', ess.listTimesheets);

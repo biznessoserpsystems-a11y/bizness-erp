@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
+import PayslipDownloadButton from '../components/PayslipDownloadButton';
 
 function money(n) {
   return `GHS ${Number(n || 0).toFixed(2)}`;
@@ -200,7 +201,7 @@ function PayslipsTab() {
         <p style={{ color: 'var(--color-text-muted)' }}>No payslips yet.</p>
       ) : (
         <table>
-          <thead><tr><th>Period</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Status</th></tr></thead>
+          <thead><tr><th>Period</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {payslips.map((p) => (
               <tr key={p.id}>
@@ -209,6 +210,13 @@ function PayslipsTab() {
                 <td>{money(p.total_deductions)}</td>
                 <td style={{ fontWeight: 600 }}>{money(p.net_pay)}</td>
                 <td><span className="badge badge-neutral">{p.run_status}</span></td>
+                <td>
+                  <PayslipDownloadButton
+                    mine
+                    payslipId={p.id}
+                    filename={`Payslip-${p.period_year}-${String(p.period_month).padStart(2, '0')}.pdf`}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

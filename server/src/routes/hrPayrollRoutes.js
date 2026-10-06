@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const hr = require('../controllers/hrPayrollController');
+const payslipController = require('../controllers/payslipController');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 
@@ -57,6 +58,7 @@ router.patch('/leave-requests/:id/status', requirePermission('hr.leave.approve')
 
 // Payroll
 router.get('/payroll-runs', requirePermission('hr.payroll.view'), hr.listPayrollRuns);
+router.get('/payslips/:id/pdf', requirePermission('hr.payroll.view'), payslipController.downloadPayslip);
 router.get('/payroll-runs/auto-run-settings', requirePermission('hr.payroll.manage'), hr.getPayrollAutoRunSettings);
 router.put('/payroll-runs/auto-run-settings', requirePermission('hr.payroll.manage'), hr.updatePayrollAutoRunSettings);
 router.get('/payroll-runs/:id', requirePermission('hr.payroll.view'), hr.getPayrollRun);
