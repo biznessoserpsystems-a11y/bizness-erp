@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { useToast } from '../context/ToastContext';
 import usePayrollControls from '../hooks/usePayrollControls';
+import PayslipDownloadButton from '../components/PayslipDownloadButton';
 import { BarChartWidget, LineChartWidget, PieChartWidget, formatMoney } from '../components/charts';
 import AttachmentsPanel from '../components/AttachmentsPanel';
 import { EmptyState } from '../Style';
@@ -527,7 +528,8 @@ function ContractTermsCard({ employeeId, canManage }) {
 }
 
 function EmployeeDetail({ id, canManage, onBack }) {
-  const { user } = useAuth();
+  const { user, hasPermission: hasEmployeePermission } = useAuth();
+  const canDownloadPayslips = hasEmployeePermission ? hasEmployeePermission('hr.payroll.view') : false;
   const [employee, setEmployee] = useState(null);
   const [history, setHistory] = useState(null);
   const [shifts, setShifts] = useState([]);
@@ -1159,7 +1161,7 @@ function EmployeeDetail({ id, canManage, onBack }) {
         ) : (
           <table>
             <thead>
-              <tr><th>Period</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Run status</th></tr>
+              <tr><th>Period</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Run status</th>{canDownloadPayslips && <th></th>}</tr>
             </thead>
             <tbody>
               {employee.payslips.map((p) => (
@@ -1169,6 +1171,14 @@ function EmployeeDetail({ id, canManage, onBack }) {
                   <td>{money(p.total_deductions)}</td>
                   <td>{money(p.net_pay)}</td>
                   <td><span className={`badge ${STATUS_BADGE[p.run_status] || 'badge-neutral'}`}>{p.run_status}</span></td>
+                  {canDownloadPayslips && (
+                    <td>
+                      <PayslipDownloadButton
+                        payslipId={p.id}
+                        filename={`Payslip-${employee.employee_no}-${p.period_year}-${String(p.period_month).padStart(2, '0')}.pdf`}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -2347,7 +2357,7 @@ function PayrollRunDetail({ id, canManage, onBack }) {
             <thead>
               <tr>
                 <th>Employee</th><th>Basic</th><th>Allowances</th><th>Gross</th>
-                <th>SSNIT (5.5%)</th><th>PAYE</th><th>Net pay</th>
+                <th>SSNIT (5.5%)</th><th>PAYE</th><th>Net pay</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -2360,6 +2370,12 @@ function PayrollRunDetail({ id, canManage, onBack }) {
                   <td>{money(p.ssnit_employee)}</td>
                   <td>{money(p.income_tax)}</td>
                   <td>{money(p.net_pay)}</td>
+                  <td>
+                    <PayslipDownloadButton
+                      payslipId={p.id}
+                      filename={`Payslip-${p.employee_no}-${run.period_year}-${String(run.period_month).padStart(2, '0')}.pdf`}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

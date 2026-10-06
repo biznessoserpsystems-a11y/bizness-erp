@@ -106,6 +106,10 @@ async function reverseJournalEntry(client, { companyId, userId, journalEntryId, 
   });
 
   await client.query('UPDATE journal_entries SET status = $1, reversed_by_entry_id = $2 WHERE id = $3', ['reversed', reversal.id, journalEntryId]);
+  // The financial statements, ledger and trial balance all skip entries whose status is 'reversed'.
+  // The original entry is skipped, so its mirror entry must be skipped too; otherwise the report
+  // is left showing the mirror alone (the opposite sign) instead of netting to zero.
+  await client.query('UPDATE journal_entries SET status = $1 WHERE id = $2', ['reversed', reversal.id]);
   return reversal;
 }
 
