@@ -200,6 +200,7 @@ export const NAV = [
       { label: 'Access Control', to: '/admin/access-control', enabled: true, permission: 'system.access_control.manage' },
       { label: 'Compliance Calendar', to: '/compliance-calendar', enabled: true, permission: 'system.compliance.manage' },
       { label: 'Petty Cash Settings', to: '/settings/petty-cash', enabled: true, permission: 'accounting.petty_cash.settings' },
+      { label: 'Reset Ledger Balances', to: '/settings/ledger-reset', enabled: true, permission: 'accounting.ledger.reset' },
       { label: 'Theme', to: '/settings/theme', enabled: true },
     ],
   },
