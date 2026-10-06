@@ -50,6 +50,7 @@ import Banking from './pages/Banking';
 import BankReconciliationStatement from './pages/BankReconciliationStatement';
 import PettyCash from './pages/PettyCash';
 import PettyCashSettings from './pages/PettyCashSettings';
+import LedgerReset from './pages/LedgerReset';
 import Budgets from './pages/Budgets';
 import ProcurementBudget from './pages/ProcurementBudget';
 import SalesBudget from './pages/SalesBudget';
@@ -164,6 +165,10 @@ export default function App() {
             <AccessControl />
           </ProtectedRoute>
         }
+      />
+      <Route
+        path="/settings/ledger-reset"
+        element={<ProtectedRoute requirePermission="accounting.ledger.reset"><LedgerReset /></ProtectedRoute>}
       />
       <Route
         path="/settings/petty-cash"

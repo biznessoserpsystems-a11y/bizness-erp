@@ -74,7 +74,10 @@ export default function BackupRestore() {
       setConfirmText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
-      setRestoreResult({ success: false, message: err.response?.data?.error || 'Restore failed.' });
+      const status = err.response?.status;
+      const message = err.response?.data?.error
+        || (status ? `Restore failed (the server answered with HTTP ${status}).` : 'Restore failed: the server could not be reached or the request timed out.');
+      setRestoreResult({ success: false, message, details: err.response?.data?.details });
     } finally {
       setRestoring(false);
       loadLogs();
@@ -132,6 +135,9 @@ export default function BackupRestore() {
         {restoreResult && (
           <div className={restoreResult.success ? 'success-banner' : 'error-banner'} style={{ marginTop: 16 }}>
             {restoreResult.message}
+            {restoreResult.details && (
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, marginTop: 8, marginBottom: 0 }}>{restoreResult.details}</pre>
+            )}
           </div>
         )}
       </div>

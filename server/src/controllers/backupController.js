@@ -26,7 +26,10 @@ const createBackup = asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/sql');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-  const dump = spawn('pg_dump', ['--clean', '--if-exists', '--no-owner', '--no-privileges', DATABASE_URL]);
+  // --schema=public: only the app's own tables. A hosted Postgres (Supabase, etc.) also holds its own
+  // system schemas (auth, storage, extensions...) that this role can't drop or recreate, so including
+  // them makes the backup impossible to restore.
+  const dump = spawn('pg_dump', ['--schema=public', '--clean', '--if-exists', '--no-owner', '--no-privileges', DATABASE_URL]);
 
   let bytesWritten = 0;
   let stderrOutput = '';
@@ -83,6 +86,37 @@ function looksLikeCompleteDump(text) {
   return startsWithRealHeader && endsWithCompletionMarker;
 }
 
+// Schemas a dump creates other than 'public'. A backup made before backups were limited to the app's own
+// schema also contains the database host's system schemas, which can't be restored by this app's login.
+function foreignSchemasIn(text) {
+  const names = new Set();
+  for (const m of text.matchAll(/^CREATE SCHEMA (?:IF NOT EXISTS )?"?([A-Za-z0-9_]+)"?;/gm)) {
+    if (m[1] !== 'public') names.add(m[1]);
+  }
+  return [...names];
+}
+
+// pg_dump --clean writes DROP SCHEMA public / CREATE SCHEMA public, which fails whenever an extension
+// (pgcrypto, uuid-ossp) lives in public, and public must never be dropped on a hosted database anyway.
+// The tables are cleared by the preamble below instead, so those two lines are removed.
+function prepareRestoreSql(text) {
+  const withoutSchemaStatements = text
+    .replace(/^DROP SCHEMA IF EXISTS public;\r?\n/m, '')
+    .replace(/^CREATE SCHEMA public;\r?\n/m, '');
+  // Drop every table in public first (CASCADE), including tables the backup doesn't know about, so a
+  // newer table with a foreign key into an older one can't block the restore. lock_timeout makes a
+  // blocked DROP fail with a clear message instead of hanging until the request times out.
+  const preamble = `SET client_min_messages = warning;
+SET lock_timeout = '20s';
+DO $$ DECLARE r record; BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', r.tablename);
+  END LOOP;
+END $$;
+`;
+  return preamble + withoutSchemaStatements;
+}
+
 const restoreBackup = asyncHandler(async (req, res) => {
   if (!DATABASE_URL) throw new ApiError(500, 'DATABASE_URL is not configured on the server');
   if (!req.file) throw new ApiError(400, 'A backup .sql file is required');
@@ -108,7 +142,15 @@ const restoreBackup = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'This file does not look like a complete Bizness-OS backup — it may be truncated or corrupted. Restore was not attempted.');
   }
 
+  const foreign = foreignSchemasIn(text);
+  if (foreign.length) {
+    throw new ApiError(400, `This backup also contains the database host's own system schemas (${foreign.slice(0, 5).join(', ')}${foreign.length > 5 ? ', ...' : ''}), which can't be restored safely. It was made before backups were limited to the app's own data. Create a new backup from this page and restore that one. Restore was not attempted.`);
+  }
+
+  const restoreSql = Buffer.from(prepareRestoreSql(text), 'utf8');
   const restore = spawn('psql', ['--single-transaction', '--set', 'ON_ERROR_STOP=1', DATABASE_URL]);
+  let responded = false;
+  const respond = (status, body) => { if (!responded) { responded = true; res.status(status).json(body); } };
 
   let stderrOutput = '';
   let stdoutOutput = '';
@@ -117,7 +159,7 @@ const restoreBackup = asyncHandler(async (req, res) => {
 
   restore.on('error', async (err) => {
     await logBackupEvent({ action: 'restore', status: 'failed', errorMessage: err.message, userId: req.user.id }).catch(() => {});
-    res.status(500).json({ error: `psql failed to start: ${err.message}` });
+    respond(500, { error: `psql failed to start: ${err.message}` });
   });
 
   restore.on('close', async (code) => {
@@ -129,17 +171,23 @@ const restoreBackup = asyncHandler(async (req, res) => {
     }).catch(() => {});
 
     if (code !== 0) {
-      return res.status(500).json({ error: 'Restore failed and was rolled back — no changes were made.', details: stderrOutput.slice(0, 2000) });
+      // Lead with the lines that explain the failure; psql can print a lot of other output around them.
+      const keyLines = stderrOutput.split('\n').filter((l) => /^(psql:|ERROR|DETAIL|HINT|CONTEXT|LINE|FATAL)/.test(l)).join('\n');
+      return respond(500, { error: 'Restore failed and was rolled back — no changes were made.', details: (keyLines || stderrOutput || `psql exited with code ${code}`).slice(0, 2000) });
     }
 
     await recordAudit({
       companyId: req.user.companyId, userId: req.user.id, action: 'UPDATE',
       entityType: 'backup', entityId: null, newValues: { restoredBytes: req.file.buffer.length }, ip: req.ip,
     }).catch(() => {});
-    res.json({ success: true, output: stdoutOutput.slice(-2000) });
+    if (!responded) { responded = true; res.json({ success: true, output: stdoutOutput.slice(-2000) }); }
   });
 
-  restore.stdin.write(req.file.buffer);
+  // If psql stops early (a permission error on the first statement, say) while the file is still being
+  // written to it, the write fails with EPIPE. Unhandled, that crashes the whole server and the real
+  // error is lost; psql's own message is reported from the 'close' handler above instead.
+  restore.stdin.on('error', () => {});
+  restore.stdin.write(restoreSql);
   restore.stdin.end();
 });
 
@@ -154,4 +202,4 @@ const listBackupLogs = asyncHandler(async (req, res) => {
   res.json(rows);
 });
 
-module.exports = { createBackup, restoreBackup, listBackupLogs, looksLikeCompleteDump };
+module.exports = { createBackup, restoreBackup, listBackupLogs, looksLikeCompleteDump, foreignSchemasIn, prepareRestoreSql };
