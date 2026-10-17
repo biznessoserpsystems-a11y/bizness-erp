@@ -26,9 +26,24 @@ const { Document, Packer, Paragraph, HeadingLevel, Table, TableRow, TableCell, T
  * writes it — this file has no knowledge of Express at all.
  */
 
+// Accounting convention: negative money is shown in brackets, e.g. (5,258.50),
+// not with a minus sign. Rounding is left to toLocaleString exactly as before;
+// the sign is only decided afterwards, so a tiny negative that rounds to 0.00
+// prints "0.00" rather than "(0.00)".
+function fmtCurrency(value) {
+  const num = Number(value);
+  const text = Math.abs(num).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return num < 0 && Math.abs(num) >= 0.005 ? `(${text})` : text;
+}
+
+// Excel version of the same rule. The cell keeps its real numeric value (so
+// sums and charts still work); only the display changes. "_)" reserves the
+// width of a closing bracket after positives so decimals line up with negatives.
+const ACCOUNTING_NUMFMT = '#,##0.00_);(#,##0.00)';
+
 function fmtCell(value, format) {
   if (value === null || value === undefined) return '';
-  if (format === 'currency') return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (format === 'currency') return fmtCurrency(value);
   if (format === 'number') return Number(value).toLocaleString();
   if (format === 'date') return new Date(value).toLocaleDateString();
   return String(value);
@@ -75,7 +90,7 @@ async function tableToExcel({ title, subtitle, columns, rows }) {
     columns.forEach((col, i) => {
       const cell = r.getCell(i + 1);
       cell.alignment = { horizontal: col.align || 'left' };
-      if (col.format === 'currency') cell.numFmt = '#,##0.00';
+      if (col.format === 'currency') cell.numFmt = ACCOUNTING_NUMFMT;
       if (col.format === 'date') cell.numFmt = 'dd/mm/yyyy';
     });
   });
@@ -115,7 +130,7 @@ async function statementToExcel({ title, subtitle, sections, grandTotal }) {
       if (line.amount !== null && line.amount !== undefined) {
         const amountCell = sheet.getCell(row, 2);
         amountCell.value = Number(line.amount);
-        amountCell.numFmt = '#,##0.00';
+        amountCell.numFmt = ACCOUNTING_NUMFMT;
       }
       row += 1;
     }
@@ -126,7 +141,7 @@ async function statementToExcel({ title, subtitle, sections, grandTotal }) {
       labelCell.font = { bold: true };
       const amountCell = sheet.getCell(row, 2);
       amountCell.value = Number(section.total.amount);
-      amountCell.numFmt = '#,##0.00';
+      amountCell.numFmt = ACCOUNTING_NUMFMT;
       amountCell.font = { bold: true };
       amountCell.border = { top: { style: 'thin' } };
       row += 2;
@@ -141,7 +156,7 @@ async function statementToExcel({ title, subtitle, sections, grandTotal }) {
     labelCell.font = { bold: true, size: 12 };
     const amountCell = sheet.getCell(row, 2);
     amountCell.value = Number(grandTotal.amount);
-    amountCell.numFmt = '#,##0.00';
+    amountCell.numFmt = ACCOUNTING_NUMFMT;
     amountCell.font = { bold: true, size: 12 };
     amountCell.border = { top: { style: 'double' } };
   }
@@ -206,7 +221,7 @@ async function multiTableToExcel({ title, subtitle, tables }) {
           const cell = r.getCell(i + 1);
           if (col.format === 'currency' || col.format === 'number') {
             cell.value = raw === null || raw === undefined ? null : Number(raw);
-            if (col.format === 'currency') cell.numFmt = '#,##0.00';
+            if (col.format === 'currency') cell.numFmt = ACCOUNTING_NUMFMT;
           } else if (col.format === 'date') {
             cell.value = raw ? new Date(raw) : null;
             cell.numFmt = 'dd/mm/yyyy';
@@ -366,74 +381,6 @@ function multiTableToPdf({ title, subtitle, tables }) {
 
 // ----------------------------------------------------------------- Word ----
 
-// A single employee's payslip — a bespoke layout (company header, employee
-// details, earnings, deductions, net pay), not the generic table/statement
-// shape the report exports use, since a payslip has its own fixed structure.
-function payslipToPdf({ companyName, employee, run, payslip, currency }) {
-  const doc = new PDFDocument({ margin: 40, size: 'A4' });
-  const left = doc.page.margins.left;
-  const right = doc.page.width - doc.page.margins.right;
-  const contentWidth = right - left;
-
-  doc.font('Helvetica-Bold').fontSize(16).fillColor('#0B6E4F').text(companyName || 'Payslip', { align: 'center' });
-  doc.font('Helvetica').fontSize(11).fillColor('#221F1A').text('Payslip', { align: 'center' });
-  doc.moveDown();
-
-  const periodLabel = new Date(run.period_year, run.period_month - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
-  doc.font('Helvetica-Bold').fontSize(10);
-  doc.text(`Period: ${periodLabel}`);
-  doc.text(`Employee: ${employee.first_name} ${employee.last_name} (${employee.employee_no})`);
-  if (employee.department) doc.text(`Department: ${employee.department}`);
-  if (employee.job_title) doc.text(`Position: ${employee.job_title}`);
-  if (employee.ssnit_number) doc.text(`SSNIT No.: ${employee.ssnit_number}`);
-  if (employee.tin_number) doc.text(`TIN: ${employee.tin_number}`);
-  if (currency) doc.font('Helvetica').fillColor('#726B5C').text(`All amounts in ${currency}`).fillColor('#221F1A').font('Helvetica-Bold');
-  doc.moveDown();
-  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#E7E0D2').stroke();
-  doc.moveDown(0.5);
-
-  function line(label, amount, bold = false) {
-    const y = doc.y;
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10);
-    doc.text(label, left, y, { width: contentWidth * 0.6 });
-    doc.text(fmtCell(amount, 'currency'), left + contentWidth * 0.6, y, { width: contentWidth * 0.4, align: 'right' });
-    doc.x = left; // the right-aligned amount moves the cursor; put it back so headings and the footer start at the margin
-    doc.moveDown(0.6);
-  }
-
-  doc.font('Helvetica-Bold').fontSize(11).text('Earnings');
-  doc.moveDown(0.3);
-  line('Basic Salary', payslip.basic_salary);
-  if (Number(payslip.allowances) > 0) line('Allowances', payslip.allowances);
-  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').stroke();
-  doc.moveDown(0.2);
-  line('Gross Pay', payslip.gross_pay, true);
-  doc.moveDown(0.6);
-
-  doc.font('Helvetica-Bold').fontSize(11).text('Deductions');
-  doc.moveDown(0.3);
-  if (Number(payslip.ssnit_employee) > 0) line('SSNIT (Employee)', payslip.ssnit_employee);
-  if (Number(payslip.tier3_employee) > 0) line('Tier 3 Pension (Employee)', payslip.tier3_employee);
-  if (Number(payslip.income_tax) > 0) line('PAYE (Income Tax)', payslip.income_tax);
-  if (Number(payslip.withholding_tax) > 0) line('Withholding Tax', payslip.withholding_tax);
-  if (Number(payslip.other_deductions) > 0) line('Other Deductions', payslip.other_deductions);
-  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').stroke();
-  doc.moveDown(0.2);
-  line('Total Deductions', payslip.total_deductions, true);
-  doc.moveDown(0.8);
-
-  doc.moveTo(left, doc.y).lineTo(right, doc.y).strokeColor('#221F1A').lineWidth(1.5).stroke();
-  doc.moveDown(0.3);
-  doc.font('Helvetica-Bold').fontSize(13).fillColor('#0B6E4F');
-  line('NET PAY', payslip.net_pay, true);
-  doc.fillColor('#221F1A');
-
-  doc.moveDown(2);
-  doc.font('Helvetica').fontSize(8).fillColor('#726B5C').text('This is a computer-generated payslip and does not require a signature.', { align: 'center' });
-
-  return collectPdfBuffer(doc);
-}
-
 async function tableToDocx({ title, subtitle, columns, rows }) {
   const headerRow = new TableRow({
     children: columns.map((col) => new TableCell({
@@ -563,4 +510,4 @@ async function sendExport(res, format, filenameBase, data) {
   res.send(buffer);
 }
 
-module.exports = { buildExport, sendExport, MIME, fmtCell, payslipToPdf };
+module.exports = { buildExport, sendExport, MIME, fmtCell };
