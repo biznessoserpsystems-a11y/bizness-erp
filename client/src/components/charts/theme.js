@@ -49,3 +49,16 @@ export function formatMoney(n, currency = 'GHS') {
   const num = Number(n) || 0;
   return `${currency} ${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+// Accounting convention for statements: negatives in brackets, e.g. GHS (5,258.50).
+// Positives get a trailing non-breaking space so decimal points line up with the
+// closing bracket on negatives when the column is right-aligned.
+export function formatAccounting(n, currency = 'GHS') {
+  const num = Number(n) || 0;
+  // Rounding is left to toLocaleString, exactly as formatMoney does, so figures
+  // never differ by a cent from the rest of the app; only the sign display changes.
+  const text = Math.abs(num).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // A tiny negative that rounds to 0.00 shows as 0.00, not (0.00).
+  const isNegative = num < 0 && Math.abs(num) >= 0.005;
+  return isNegative ? `${currency} (${text})` : `${currency} ${text}\u00A0`;
+}

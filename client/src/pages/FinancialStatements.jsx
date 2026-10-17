@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import DashboardLayout from '../layouts/DashboardLayout';
 import api from '../services/api';
-import { BarChartWidget, PieChartWidget, KpiGauge, formatMoney } from '../components/charts';
+import { BarChartWidget, PieChartWidget, KpiGauge } from '../components/charts';
+import { formatAccounting } from '../components/charts/theme';
 import ExportMenu from '../components/ExportMenu';
 import DateRangeFilter, { resolveDateRange } from '../components/DateRangeFilter';
 
@@ -32,7 +33,11 @@ export default function FinancialStatements() {
   );
 }
 
-const money = (n) => `GHS ${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+// Accounting convention: negatives in brackets, e.g. GHS (5,258.50).
+const money = (n) => formatAccounting(n);
+
+// A negative result is a loss, not a "negative profit" — pick the wording from the sign of the figure.
+const profitOrLoss = (value, profitLabel, lossLabel) => (Number(value) < 0 ? lossLabel : profitLabel);
 
 function IncomeStatement() {
   const [rangeMode, setRangeMode] = useState('this_year');
@@ -78,14 +83,14 @@ function IncomeStatement() {
             data={[
               { name: 'Revenue', value: data.totals.totalRevenue },
               { name: 'COGS', value: data.totals.totalCogs },
-              { name: 'Gross profit', value: data.totals.grossProfit },
+              { name: profitOrLoss(data.totals.grossProfit, 'Gross profit', 'Gross loss'), value: data.totals.grossProfit },
               { name: 'Opex', value: data.totals.totalOperatingExpense },
-              { name: 'Operating profit', value: data.totals.operatingProfit },
-              { name: 'Profit for the period', value: data.totals.netIncome },
+              { name: profitOrLoss(data.totals.operatingProfit, 'Operating profit', 'Operating loss'), value: data.totals.operatingProfit },
+              { name: profitOrLoss(data.totals.netIncome, 'Net profit', 'Net loss'), value: data.totals.netIncome },
             ]}
             bars={[{ key: 'value', label: 'Amount' }]}
             colorByCategory
-            valueFormatter={(v) => formatMoney(v)}
+            valueFormatter={(v) => formatAccounting(v)}
             height={260}
           />
           <table className="statement-table">
@@ -100,13 +105,13 @@ function IncomeStatement() {
               {data.cogs.map((a) => (
                 <tr className="statement-line-row" key={a.id}><td>{a.account_name}</td><td className="statement-amount">{money(a.balance)}</td></tr>
               ))}
-              <tr className="statement-total-row"><td>Gross Profit</td><td className="statement-amount">{money(data.totals.grossProfit)}</td></tr>
+              <tr className="statement-total-row"><td>{profitOrLoss(data.totals.grossProfit, 'Gross Profit', 'Gross Loss')}</td><td className="statement-amount">{money(data.totals.grossProfit)}</td></tr>
 
               <tr className="statement-subheader-row"><td colSpan={2}>Operating Expenses</td></tr>
               {data.operatingExpense.map((a) => (
                 <tr className="statement-line-row" key={a.id}><td>{a.account_name}</td><td className="statement-amount">{money(a.balance)}</td></tr>
               ))}
-              <tr className="statement-total-row"><td>Operating Profit</td><td className="statement-amount">{money(data.totals.operatingProfit)}</td></tr>
+              <tr className="statement-total-row"><td>{profitOrLoss(data.totals.operatingProfit, 'Operating Profit', 'Operating Loss')}</td><td className="statement-amount">{money(data.totals.operatingProfit)}</td></tr>
 
               <tr className="statement-subheader-row"><td colSpan={2}>Finance Costs</td></tr>
               {data.financeCosts.length === 0
@@ -114,7 +119,7 @@ function IncomeStatement() {
                 : data.financeCosts.map((a) => (
                   <tr className="statement-line-row" key={a.id}><td>{a.account_name}</td><td className="statement-amount">{money(a.balance)}</td></tr>
                 ))}
-              <tr className="statement-total-row"><td>Profit Before Tax</td><td className="statement-amount">{money(data.totals.profitBeforeTax)}</td></tr>
+              <tr className="statement-total-row"><td>{profitOrLoss(data.totals.profitBeforeTax, 'Profit Before Tax', 'Loss Before Tax')}</td><td className="statement-amount">{money(data.totals.profitBeforeTax)}</td></tr>
 
               <tr className="statement-subheader-row"><td colSpan={2}>Income Tax Expense</td></tr>
               {data.taxExpense.length === 0
@@ -124,7 +129,7 @@ function IncomeStatement() {
                 ))}
 
               <tr className="statement-grand-total-row">
-                <td>Profit for the Period</td>
+                <td>{profitOrLoss(data.totals.netIncome, 'Net Profit for the Period', 'Net Loss for the Period')}</td>
                 <td className="statement-amount" style={{ color: data.totals.netIncome >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>{money(data.totals.netIncome)}</td>
               </tr>
             </tbody>
@@ -178,7 +183,7 @@ function BalanceSheet() {
               { name: 'Liabilities', value: data.totals.totalLiabilities, color: '#B3261E' },
               { name: 'Equity', value: data.totals.totalEquity, color: '#2F9E6E' },
             ]}
-            valueFormatter={(v) => formatMoney(v)}
+            valueFormatter={(v) => formatAccounting(v)}
             height={260}
           />
           <table className="statement-table">
@@ -312,7 +317,7 @@ function CashFlowStatement() {
         <table className="statement-table">
           <tbody>
             <tr className="statement-section-row"><td colSpan={2}>Operating Activities</td></tr>
-            <tr className="statement-line-row"><td>Net Income for the Period</td><td className="statement-amount">{money(data.operating.netIncome)}</td></tr>
+            <tr className="statement-line-row"><td>{profitOrLoss(data.operating.netIncome, 'Net Profit for the Period', 'Net Loss for the Period')}</td><td className="statement-amount">{money(data.operating.netIncome)}</td></tr>
             <tr className="statement-line-row"><td>Add: Depreciation</td><td className="statement-amount">{money(data.operating.depreciation)}</td></tr>
             {data.operating.workingCapitalChanges.map((m, i) => (
               <tr className="statement-line-row" key={i}><td>{m.label}</td><td className="statement-amount">{money(m.amount)}</td></tr>
@@ -390,7 +395,7 @@ function ChangesInEquity() {
               <td className="statement-amount">{money(data.totals.opening)}</td>
             </tr>
             <tr className="statement-line-row">
-              <td>Profit for the Year Transferred</td>
+              <td>{profitOrLoss(data.totals.profitTransferred, 'Profit for the Year Transferred', 'Loss for the Year Transferred')}</td>
               {data.accounts.map((a) => <td key={a.accountId} className="statement-amount">{money(a.profitTransferred)}</td>)}
               <td className="statement-amount">{money(data.totals.profitTransferred)}</td>
             </tr>
